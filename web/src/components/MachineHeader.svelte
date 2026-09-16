@@ -1,8 +1,18 @@
 <script lang="ts">
   import { fleet } from '../lib/store.svelte'
-  import { ago } from '../lib/format'
+  import { ago, clock } from '../lib/format'
   let { id, count }: { id: string; count: number } = $props()
   const m = $derived(fleet.machines[id])
+  const armed = $derived(!!m && m.armed && (m.armed_until === 0 || m.armed_until > Date.now()))
+  let busy = $state(false)
+  async function toggle() {
+    busy = true
+    try {
+      await fleet.arm(id, !armed)
+    } finally {
+      busy = false
+    }
+  }
 </script>
 
 <div class="mh">
@@ -12,6 +22,14 @@
   {:else}
     <span class="state">{count} session{count === 1 ? '' : 's'}</span>
   {/if}
+  <button class="arm" class:on={armed} disabled={busy || !m?.online} onclick={toggle}
+    title={armed ? 'Approvals go to your phone. Click to send them back to the terminal.' : 'Send approvals to your phone'}>
+    {#if armed}
+      to phone{m.armed_until ? ` until ${clock(m.armed_until)}` : ''}
+    {:else}
+      approvals: terminal
+    {/if}
+  </button>
 </div>
 
 <style>
@@ -20,13 +38,15 @@
     top: 48px;
     z-index: 4;
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 10px;
-    padding: 14px 16px 6px;
+    padding: 12px 16px 6px;
     background: var(--page);
     border-bottom: 1px solid var(--hairline);
   }
   .name { font-weight: 600; font-size: 17px; }
   .state { color: var(--muted); font-size: 13px; }
   .state.off { color: var(--signal); }
+  .arm { margin-left: auto; font-size: 13px; padding: 4px 10px; color: var(--muted); }
+  .arm.on { color: var(--signal); border-color: var(--signal); background: var(--signal-soft); }
 </style>

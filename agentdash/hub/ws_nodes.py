@@ -8,10 +8,13 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..models import (
+    NODE_DECISION_CREATED,
+    NODE_DECISION_RESOLVED,
     NODE_EVENT,
     NODE_HELLO,
     NODE_MESSAGES,
     NODE_SESSIONS,
+    Decision,
     Frame,
     Machine,
     Message,
@@ -49,6 +52,8 @@ async def nodes_ws(ws: WebSocket) -> None:
                 log.warning("bad node frame: %s", e)
                 continue
             p = frame.payload
+            if frame.type != NODE_MESSAGES:
+                log.debug("frame %s from %s", frame.type, link.machine if link else "?")
             if frame.type == NODE_HELLO:
                 m = Machine.model_validate(
                     {**p.get("machine", {}), "online": True, "last_seen": now_ms()}
@@ -63,7 +68,10 @@ async def nodes_ws(ws: WebSocket) -> None:
                         pass
                 await state.db.upsert_machine(m)
                 state.bus.publish("machine.updated", m.model_dump())
-                await link.send("hello.ok", {"server_time": now_ms()})
+                await link.send(
+                    "hello.ok",
+                    {"server_time": now_ms(), "armed": m.armed, "armed_until": m.armed_until},
+                )
                 log.info("node %s connected", m.id)
                 continue
             if link is None:
@@ -86,6 +94,10 @@ async def nodes_ws(ws: WebSocket) -> None:
                         "reset": reset,
                     },
                 )
+            elif frame.type == NODE_DECISION_CREATED:
+                await state.decision_created(Decision.model_validate(p))
+            elif frame.type == NODE_DECISION_RESOLVED:
+                await state.decision_resolved(Decision.model_validate(p))
             elif frame.type == NODE_EVENT:
                 rid = p.get("request_id")
                 if rid and state.resolve(rid, p):
@@ -105,4 +117,6 @@ async def nodes_ws(ws: WebSocket) -> None:
             state.bus.publish("machine.updated", {"id": link.machine, "online": False})
             for s in await state.db.list_sessions(machine=link.machine):
                 state.bus.publish("session.updated", s.model_dump())
+            for d in await state.db.expire_decisions(machine=link.machine):
+                state.bus.publish("decision.updated", d.model_dump())
             log.info("node %s disconnected", link.machine)

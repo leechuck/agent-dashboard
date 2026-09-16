@@ -29,7 +29,31 @@ export interface Machine {
   node_version: string
   online: boolean
   armed: boolean
+  armed_until: number
   last_seen: number
+}
+
+export type DecisionStatus = 'pending' | 'allowed' | 'denied' | 'expired' | 'cancelled' | 'answered'
+
+export interface Decision {
+  id: string
+  machine: string
+  session_key: string
+  harness: string
+  kind: 'permission' | 'approval' | 'question'
+  tool_name: string
+  tool_input: Record<string, unknown> | null
+  question: string
+  reason: string
+  cwd: string
+  session_name: string
+  native_url: string
+  created_at: number
+  expires_at: number
+  status: DecisionStatus
+  answered_at: number | null
+  answer_reason: string
+  remember: boolean
 }
 
 export interface Message {

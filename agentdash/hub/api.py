@@ -26,16 +26,68 @@ async def machines(request: Request):
 
 class ArmBody(BaseModel):
     armed: bool
+    hours: float | None = None
 
 
 @router.post("/machines/{machine_id}/arm")
 async def arm(machine_id: str, body: ArmBody, request: Request):
     st = _state(request)
-    await st.db.set_machine_armed(machine_id, body.armed)
-    link = st.nodes.get(machine_id)
-    if link:
-        await link.send("machine.arm", {"armed": body.armed})
-    st.bus.publish("machine.updated", {"id": machine_id, "armed": body.armed})
+    hours = body.hours if body.hours is not None else request.app.state.settings.arm_hours
+    return await st.set_armed(machine_id, body.armed, hours)
+
+
+@router.get("/decisions")
+async def decisions(request: Request, pending: bool = False, limit: int = 100):
+    st = _state(request)
+    for d in await st.db.expire_decisions():
+        st.bus.publish("decision.updated", d.model_dump())
+    return [d.model_dump() for d in await st.db.list_decisions(pending, limit)]
+
+
+class AnswerBody(BaseModel):
+    behavior: str  # allow | deny
+    reason: str = ""
+    remember: bool = False
+
+
+@router.post("/decisions/{decision_id}/answer")
+async def answer(decision_id: str, body: AnswerBody, request: Request):
+    if body.behavior not in ("allow", "deny"):
+        raise HTTPException(400, "behavior must be allow or deny")
+    return await _state(request).answer_decision(
+        decision_id, body.behavior, body.reason, body.remember
+    )
+
+
+@router.get("/push/key")
+async def push_key(request: Request):
+    st = _state(request)
+    return {
+        "key": st.pusher.public_key if st.pusher else "",
+        "enabled": bool(st.pusher and st.pusher.enabled),
+    }
+
+
+class SubscribeBody(BaseModel):
+    subscription: dict
+    label: str = ""
+
+
+@router.post("/push/subscribe")
+async def push_subscribe(body: SubscribeBody, request: Request):
+    await _state(request).db.add_push_subscription(body.subscription, body.label)
+    return {"ok": True}
+
+
+@router.post("/push/unsubscribe")
+async def push_unsubscribe(body: SubscribeBody, request: Request):
+    await _state(request).db.remove_push_subscription(body.subscription.get("endpoint", ""))
+    return {"ok": True}
+
+
+@router.post("/push/test")
+async def push_test(request: Request):
+    await _state(request).notify("agentdash", "Notifications are working.", "/#/")
     return {"ok": True}
 
 

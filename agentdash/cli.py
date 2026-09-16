@@ -56,5 +56,38 @@ def node(
     asyncio.run(run_node(s))
 
 
+install_app = typer.Typer(help="Install hooks and services on this machine.")
+app.add_typer(install_app, name="install")
+
+
+@install_app.command("hooks")
+def install_hooks(
+    config_dir: list[str] = typer.Option(
+        None, help="Claude config dir(s); default: settings claude_config_dirs that exist"
+    ),
+    permission_timeout: int = typer.Option(1800, help="seconds a phone decision may take"),
+    remove: bool = typer.Option(False, help="remove agentdash hooks instead"),
+) -> None:
+    """Write agentdash hook entries into ~/.claude/settings.json (backup kept)."""
+    from pathlib import Path
+
+    from .install.hooks import install, uninstall
+
+    s = get_settings()
+    dirs = (
+        [Path(d).expanduser() for d in config_dir]
+        if config_dir
+        else [d for d in s.claude_config_dirs if d.exists()]
+    )
+    for d in dirs:
+        path = d / "settings.json"
+        if remove:
+            uninstall(path)
+            typer.echo(f"removed agentdash hooks from {path}")
+        else:
+            install(path, permission_timeout)
+            typer.echo(f"installed agentdash hooks into {path}")
+
+
 if __name__ == "__main__":
     app()

@@ -8,7 +8,7 @@ from typing import Any
 
 import aiosqlite
 
-from .models import Machine, Session, SessionStatus, now_ms
+from .models import Decision, DecisionStatus, Machine, Session, SessionStatus, now_ms
 
 TERMINAL = ("done", "failed", "stopped", "offline")
 
@@ -16,7 +16,16 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS machines (
   id TEXT PRIMARY KEY,
   hostname TEXT, os TEXT, harnesses TEXT, node_version TEXT,
-  online INTEGER DEFAULT 0, armed INTEGER DEFAULT 0, last_seen INTEGER
+  online INTEGER DEFAULT 0, armed INTEGER DEFAULT 0, armed_until INTEGER DEFAULT 0,
+  last_seen INTEGER
+);
+CREATE TABLE IF NOT EXISTS decisions (
+  id TEXT PRIMARY KEY,
+  machine TEXT, session_key TEXT, status TEXT, created_at INTEGER, data TEXT
+);
+CREATE INDEX IF NOT EXISTS decisions_status ON decisions(status, created_at);
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  endpoint TEXT PRIMARY KEY, data TEXT, created_at INTEGER, label TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
   key TEXT PRIMARY KEY,
@@ -45,8 +54,20 @@ class Database:
         self._db = await conn
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(SCHEMA)
+        await self._migrate()
         await self._db.execute("UPDATE machines SET online = 0")
         await self._db.commit()
+
+    async def _migrate(self) -> None:
+        """Add columns introduced after the first release (SQLite has no ADD IF NOT EXISTS)."""
+        wanted = {"machines": {"armed_until": "INTEGER DEFAULT 0"}}
+        for table, cols in wanted.items():
+            cur = await self.db.execute(f"PRAGMA table_info({table})")
+            have = {r["name"] for r in await cur.fetchall()}
+            for col, decl in cols.items():
+                if col not in have:
+                    await self.db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        await self.db.commit()
 
     async def close(self) -> None:
         if self._db:
@@ -62,8 +83,8 @@ class Database:
     # machines ---------------------------------------------------------
     async def upsert_machine(self, m: Machine) -> None:
         await self.db.execute(
-            """INSERT INTO machines(id,hostname,os,harnesses,node_version,online,armed,last_seen)
-               VALUES(?,?,?,?,?,?,?,?)
+            """INSERT INTO machines(id,hostname,os,harnesses,node_version,online,armed,
+                 armed_until,last_seen) VALUES(?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO UPDATE SET hostname=excluded.hostname, os=excluded.os,
                  harnesses=excluded.harnesses, node_version=excluded.node_version,
                  online=excluded.online, last_seen=excluded.last_seen""",
@@ -75,6 +96,7 @@ class Database:
                 m.node_version,
                 int(m.online),
                 int(m.armed),
+                m.armed_until,
                 m.last_seen,
             ),
         )
@@ -101,26 +123,89 @@ class Database:
                 )
         await self.db.commit()
 
-    async def set_machine_armed(self, machine_id: str, armed: bool) -> None:
-        await self.db.execute("UPDATE machines SET armed=? WHERE id=?", (int(armed), machine_id))
+    async def set_machine_armed(self, machine_id: str, armed: bool, armed_until: int = 0) -> None:
+        await self.db.execute(
+            "UPDATE machines SET armed=?, armed_until=? WHERE id=?",
+            (int(armed), armed_until, machine_id),
+        )
         await self.db.commit()
+
+    async def get_machine(self, machine_id: str) -> Machine | None:
+        cur = await self.db.execute("SELECT * FROM machines WHERE id=?", (machine_id,))
+        r = await cur.fetchone()
+        return self._machine(r) if r else None
+
+    @staticmethod
+    def _machine(r: Any) -> Machine:
+        return Machine(
+            id=r["id"],
+            hostname=r["hostname"] or "",
+            os=r["os"] or "",
+            harnesses=json.loads(r["harnesses"] or "[]"),
+            node_version=r["node_version"] or "",
+            online=bool(r["online"]),
+            armed=bool(r["armed"]),
+            armed_until=r["armed_until"] or 0,
+            last_seen=r["last_seen"] or 0,
+        )
 
     async def list_machines(self) -> list[Machine]:
         cur = await self.db.execute("SELECT * FROM machines ORDER BY id")
-        rows = await cur.fetchall()
-        return [
-            Machine(
-                id=r["id"],
-                hostname=r["hostname"] or "",
-                os=r["os"] or "",
-                harnesses=json.loads(r["harnesses"] or "[]"),
-                node_version=r["node_version"] or "",
-                online=bool(r["online"]),
-                armed=bool(r["armed"]),
-                last_seen=r["last_seen"] or 0,
-            )
-            for r in rows
-        ]
+        return [self._machine(r) for r in await cur.fetchall()]
+
+    # decisions --------------------------------------------------------
+    async def upsert_decision(self, d: Decision) -> None:
+        await self.db.execute(
+            """INSERT INTO decisions(id,machine,session_key,status,created_at,data)
+               VALUES(?,?,?,?,?,?)
+               ON CONFLICT(id) DO UPDATE SET status=excluded.status, data=excluded.data""",
+            (d.id, d.machine, d.session_key, d.status, d.created_at, d.model_dump_json()),
+        )
+        await self.db.commit()
+
+    async def get_decision(self, decision_id: str) -> Decision | None:
+        cur = await self.db.execute("SELECT data FROM decisions WHERE id=?", (decision_id,))
+        r = await cur.fetchone()
+        return Decision.model_validate_json(r["data"]) if r else None
+
+    async def list_decisions(self, pending_only: bool = False, limit: int = 100) -> list[Decision]:
+        sql = "SELECT data FROM decisions"
+        if pending_only:
+            sql += " WHERE status='pending'"
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        cur = await self.db.execute(sql, (limit,))
+        return [Decision.model_validate_json(r["data"]) for r in await cur.fetchall()]
+
+    async def expire_decisions(self, machine: str | None = None) -> list[Decision]:
+        """Mark pending decisions whose deadline passed (or whose node vanished)."""
+        now = now_ms()
+        out: list[Decision] = []
+        for d in await self.list_decisions(pending_only=True, limit=1000):
+            if machine is not None and d.machine != machine:
+                continue
+            if machine is not None or (d.expires_at and d.expires_at < now):
+                d.status = DecisionStatus.expired
+                d.answered_at = now
+                await self.upsert_decision(d)
+                out.append(d)
+        return out
+
+    # push subscriptions -----------------------------------------------
+    async def add_push_subscription(self, sub: dict[str, Any], label: str = "") -> None:
+        await self.db.execute(
+            """INSERT INTO push_subscriptions(endpoint,data,created_at,label) VALUES(?,?,?,?)
+               ON CONFLICT(endpoint) DO UPDATE SET data=excluded.data, label=excluded.label""",
+            (sub.get("endpoint", ""), json.dumps(sub), now_ms(), label),
+        )
+        await self.db.commit()
+
+    async def remove_push_subscription(self, endpoint: str) -> None:
+        await self.db.execute("DELETE FROM push_subscriptions WHERE endpoint=?", (endpoint,))
+        await self.db.commit()
+
+    async def list_push_subscriptions(self) -> list[dict[str, Any]]:
+        cur = await self.db.execute("SELECT data FROM push_subscriptions")
+        return [json.loads(r["data"]) for r in await cur.fetchall()]
 
     # sessions ---------------------------------------------------------
     async def replace_sessions(self, machine_id: str, sessions: list[Session]) -> list[Session]:

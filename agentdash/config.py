@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     )
     roster_interval: float = 10.0
     tail_lines: int = 200
+    decision_timeout: float = 1770.0  # seconds; keep below the hook timeout (1800)
+    arm_hours: float = 12.0
 
     @property
     def state_dir(self) -> Path:

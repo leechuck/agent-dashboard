@@ -46,11 +46,21 @@ class HubClient:
                     await ws.send(Frame(type="hello", payload=hello).model_dump_json())
                     self.connected.set()
                     log.info("connected to hub %s", self.url)
-                    await asyncio.gather(self._pump_out(ws), self._pump_in(ws))
+                    out = asyncio.create_task(self._pump_out(ws))
+                    inp = asyncio.create_task(self._pump_in(ws))
+                    done, pending = await asyncio.wait(
+                        {out, inp}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for t in pending:
+                        t.cancel()
+                    for t in done:
+                        t.result()  # re-raise the failure that ended the link
             except (OSError, websockets.WebSocketException, asyncio.CancelledError) as e:
                 if isinstance(e, asyncio.CancelledError):
                     raise
                 log.warning("hub link down (%s); retry in %.0fs", e, backoff)
+            except Exception:  # noqa: BLE001
+                log.exception("hub link failed; retry in %.0fs", backoff)
             finally:
                 self.connected.clear()
                 self._ws = None
@@ -60,7 +70,12 @@ class HubClient:
     async def _pump_out(self, ws: websockets.ClientConnection) -> None:
         while True:
             msg = await self._send_q.get()
-            await ws.send(msg)
+            try:
+                await ws.send(msg)
+            except websockets.ConnectionClosed:
+                # keep the frame for the next connection
+                self._send_q.put_nowait(msg)
+                raise
 
     async def _pump_in(self, ws: websockets.ClientConnection) -> None:
         async for raw in ws:

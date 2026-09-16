@@ -78,7 +78,44 @@ class Machine(BaseModel):
     node_version: str = ""
     online: bool = False
     armed: bool = False
+    armed_until: int = 0  # ms; 0 = no expiry
     last_seen: int = Field(default_factory=now_ms)
+
+    @property
+    def armed_now(self) -> bool:
+        return self.armed and (self.armed_until == 0 or now_ms() < self.armed_until)
+
+
+class DecisionStatus(StrEnum):
+    pending = "pending"
+    allowed = "allowed"
+    denied = "denied"
+    expired = "expired"
+    cancelled = "cancelled"
+    answered = "answered"  # question answered elsewhere / not answerable here
+
+
+class Decision(BaseModel):
+    """A prompt a harness raised that needs Robert: permission, approval, question."""
+
+    id: str
+    machine: str
+    session_key: str
+    harness: Harness
+    kind: Literal["permission", "approval", "question"] = "permission"
+    tool_name: str = ""
+    tool_input: dict[str, Any] | None = None
+    question: str = ""
+    reason: str = ""
+    cwd: str = ""
+    session_name: str = ""
+    native_url: str = ""
+    created_at: int = Field(default_factory=now_ms)
+    expires_at: int = 0
+    status: DecisionStatus = DecisionStatus.pending
+    answered_at: int | None = None
+    answer_reason: str = ""
+    remember: bool = False
 
 
 # --- node <-> hub frames -------------------------------------------------
@@ -98,6 +135,8 @@ NODE_SESSIONS = "sessions.snapshot"
 NODE_MESSAGES = "session.messages"
 NODE_EVENT = "event"
 NODE_PONG = "pong"
+NODE_DECISION_CREATED = "decision.created"
+NODE_DECISION_RESOLVED = "decision.resolved"
 
 # hub -> node types
 HUB_HELLO_OK = "hello.ok"
@@ -105,3 +144,5 @@ HUB_SUBSCRIBE = "messages.subscribe"
 HUB_UNSUBSCRIBE = "messages.unsubscribe"
 HUB_SEND_PROMPT = "session.prompt"
 HUB_PING = "ping"
+HUB_ARM = "machine.arm"
+HUB_DECISION_ANSWER = "decision.answer"
