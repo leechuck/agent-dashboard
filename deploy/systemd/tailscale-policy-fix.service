@@ -1,0 +1,13 @@
+[Unit]
+Description=Route tailnet ranges through tailscale0 ahead of VPN policy rules
+After=tailscaled.service
+Wants=tailscaled.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'ip rule del pref 1400 2>/dev/null; ip rule add pref 1400 to 100.64.0.0/10 lookup 52; ip -6 rule del pref 1400 2>/dev/null; ip -6 rule add pref 1400 to fd7a:115c:a1e0::/48 lookup 52'
+ExecStop=/bin/sh -c 'ip rule del pref 1400; ip -6 rule del pref 1400'
+
+[Install]
+WantedBy=multi-user.target
