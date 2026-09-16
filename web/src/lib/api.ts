@@ -1,0 +1,61 @@
+import type { BusEvent, Machine, Message, Session } from './types'
+
+async function j<T>(url: string, init?: RequestInit): Promise<T> {
+  const r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } })
+  if (r.status === 401) {
+    location.hash = '#/login'
+    throw new Error('not authorized')
+  }
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
+  return r.json() as Promise<T>
+}
+
+export const api = {
+  machines: () => j<Machine[]>('/api/machines'),
+  sessions: (active = false) => j<Session[]>(`/api/sessions?active=${active}`),
+  session: (key: string) => j<Session>(`/api/sessions/${encodeURIComponent(key)}`),
+  messages: (key: string) => j<Message[]>(`/api/sessions/${encodeURIComponent(key)}/messages`),
+  prompt: (key: string, text: string) =>
+    j<{ ok: boolean; error?: string }>(`/api/sessions/${encodeURIComponent(key)}/prompt`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    }),
+  arm: (machine: string, armed: boolean) =>
+    j<{ ok: boolean }>(`/api/machines/${encodeURIComponent(machine)}/arm`, {
+      method: 'POST',
+      body: JSON.stringify({ armed }),
+    }),
+  login: (token: string) => j<{ ok: boolean }>('/login', { method: 'POST', body: JSON.stringify({ token }) }),
+}
+
+export function subscribe(onEvent: (e: BusEvent) => void, onState: (open: boolean) => void): () => void {
+  let es: EventSource | null = null
+  let closed = false
+  let retry = 1000
+  const open = () => {
+    if (closed) return
+    es = new EventSource('/api/events')
+    es.onopen = () => {
+      retry = 1000
+      onState(true)
+    }
+    es.onmessage = (m) => {
+      try {
+        onEvent(JSON.parse(m.data))
+      } catch {
+        /* ignore */
+      }
+    }
+    es.onerror = () => {
+      onState(false)
+      es?.close()
+      setTimeout(open, retry)
+      retry = Math.min(retry * 2, 15000)
+    }
+  }
+  open()
+  return () => {
+    closed = true
+    es?.close()
+  }
+}

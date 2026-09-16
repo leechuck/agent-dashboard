@@ -1,0 +1,86 @@
+@import '@fontsource-variable/ibm-plex-sans';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+
+:root {
+  --page: #f2f4f3;
+  --surface: #ffffff;
+  --ink: #1a222b;
+  --muted: #5f6b78;
+  --hairline: #d9dee1;
+  --cobalt: #2450c7;
+  --cobalt-soft: #e4eafb;
+  --signal: #b8400b;
+  --signal-soft: #fbe9df;
+  --moss: #2d7a4f;
+  --amber: #9a6a00;
+  --amber-soft: #fbf1d6;
+  --sans: 'IBM Plex Sans Variable', system-ui, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius: 6px;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --page: #141a21;
+    --surface: #1b232c;
+    --ink: #e7ecf1;
+    --muted: #8c98a6;
+    --hairline: #2a343f;
+    --cobalt: #7fa4ff;
+    --cobalt-soft: #223054;
+    --signal: #ff9a62;
+    --signal-soft: #45291b;
+    --moss: #6cc391;
+    --amber: #e0b14c;
+    --amber-soft: #3d3218;
+  }
+}
+:root[data-theme='dark'] {
+  --page: #141a21;
+  --surface: #1b232c;
+  --ink: #e7ecf1;
+  --muted: #8c98a6;
+  --hairline: #2a343f;
+  --cobalt: #7fa4ff;
+  --cobalt-soft: #223054;
+  --signal: #ff9a62;
+  --signal-soft: #45291b;
+  --moss: #6cc391;
+  --amber: #e0b14c;
+  --amber-soft: #3d3218;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--cobalt); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button, input, textarea { font: inherit; color: inherit; }
+button {
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--cobalt); border-color: var(--cobalt); color: #fff; }
+button.primary:hover { filter: brightness(1.08); }
+button.danger { color: var(--signal); border-color: var(--signal); }
+button:disabled { opacity: .5; cursor: default; }
+:focus-visible { outline: 2px solid var(--cobalt); outline-offset: 2px; }
+code, pre, .mono { font-family: var(--mono); font-size: 13px; }
+pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

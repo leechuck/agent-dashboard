@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+*.db
+*.db-*
+node_modules/
+web/dist/
+agentdash/static/*
+!agentdash/static/.gitkeep
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+dist/

@@ -1,0 +1,108 @@
+"""Websocket endpoint that nodes connect to."""
+
+from __future__ import annotations
+
+import json
+import logging
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
+from ..models import (
+    NODE_EVENT,
+    NODE_HELLO,
+    NODE_MESSAGES,
+    NODE_SESSIONS,
+    Frame,
+    Machine,
+    Message,
+    Session,
+    now_ms,
+)
+from .state import HubState, NodeLink
+
+log = logging.getLogger(__name__)
+router = APIRouter()
+
+
+def _authorized(ws: WebSocket, token: str) -> bool:
+    if not token:
+        return True
+    auth = ws.headers.get("authorization", "")
+    return auth == f"Bearer {token}" or ws.query_params.get("token") == token
+
+
+@router.websocket("/nodes")
+async def nodes_ws(ws: WebSocket) -> None:
+    state: HubState = ws.app.state.hub
+    token: str = ws.app.state.settings.node_token
+    if not _authorized(ws, token):
+        await ws.close(code=4401)
+        return
+    await ws.accept()
+    link: NodeLink | None = None
+    try:
+        while True:
+            raw = await ws.receive_text()
+            try:
+                frame = Frame.model_validate(json.loads(raw))
+            except (json.JSONDecodeError, ValueError) as e:
+                log.warning("bad node frame: %s", e)
+                continue
+            p = frame.payload
+            if frame.type == NODE_HELLO:
+                m = Machine.model_validate(
+                    {**p.get("machine", {}), "online": True, "last_seen": now_ms()}
+                )
+                link = NodeLink(machine=m.id, ws=ws)
+                old = state.nodes.get(m.id)
+                state.nodes[m.id] = link
+                if old and old.ws is not ws:
+                    try:
+                        await old.ws.close(code=4409)
+                    except Exception:  # noqa: BLE001
+                        pass
+                await state.db.upsert_machine(m)
+                state.bus.publish("machine.updated", m.model_dump())
+                await link.send("hello.ok", {"server_time": now_ms()})
+                log.info("node %s connected", m.id)
+                continue
+            if link is None:
+                continue
+            if frame.type == NODE_SESSIONS:
+                sessions = [Session.model_validate(s) for s in p.get("sessions", [])]
+                changed = await state.db.replace_sessions(link.machine, sessions)
+                for s in changed:
+                    state.bus.publish("session.updated", s.model_dump())
+            elif frame.type == NODE_MESSAGES:
+                key = p.get("session_key", "")
+                msgs = [Message.model_validate(m) for m in p.get("messages", [])]
+                reset = bool(p.get("reset"))
+                state.cache_messages(key, msgs, reset)
+                state.bus.publish(
+                    "session.messages",
+                    {
+                        "session_key": key,
+                        "messages": [m.model_dump() for m in msgs],
+                        "reset": reset,
+                    },
+                )
+            elif frame.type == NODE_EVENT:
+                rid = p.get("request_id")
+                if rid and state.resolve(rid, p):
+                    continue
+                await state.db.add_event(
+                    link.machine, p.get("session_key", ""), p.get("kind", "event"), p
+                )
+                state.bus.publish("event", {"machine": link.machine, **p})
+    except WebSocketDisconnect:
+        pass
+    except Exception:  # noqa: BLE001
+        log.exception("node websocket error")
+    finally:
+        if link and state.nodes.get(link.machine) is link:
+            del state.nodes[link.machine]
+            await state.db.set_machine_online(link.machine, False)
+            state.bus.publish("machine.updated", {"id": link.machine, "online": False})
+            for s in await state.db.list_sessions(machine=link.machine):
+                state.bus.publish("session.updated", s.model_dump())
+            log.info("node %s disconnected", link.machine)
