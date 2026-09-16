@@ -128,7 +128,7 @@ class ClaudeCollector:
                         harness=Harness.claude,
                         provider=provider,
                         session_id=sid,
-                        name=a.get("name") or (reg or {}).get("name", "") or "",
+                        name=_short_name(a.get("name") or (reg or {}).get("name", "") or ""),
                         cwd=cwd,
                         kind=kind if kind in ("interactive", "background") else "unknown",
                         status=status,
@@ -155,7 +155,7 @@ class ClaudeCollector:
                         harness=Harness.claude,
                         provider=provider,
                         session_id=sid,
-                        name=reg.get("name", ""),
+                        name=_short_name(reg.get("name", "")),
                         cwd=cwd,
                         kind="interactive" if reg.get("kind") == "interactive" else "unknown",
                         status=_STATUS_MAP.get(reg.get("status", ""), SessionStatus.idle),
@@ -171,6 +171,12 @@ class ClaudeCollector:
                     )
                 )
         return sessions
+
+
+def _short_name(name: str, limit: int = 72) -> str:
+    """Background sessions are named after their prompt; keep the first line, capped."""
+    first = name.strip().split("\n", 1)[0]
+    return first if len(first) <= limit else first[: limit - 1].rstrip() + "…"
 
 
 def _activity_ms(tpath: Path | None, reg: dict[str, Any] | None, started: Any) -> int:

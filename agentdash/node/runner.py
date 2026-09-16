@@ -316,8 +316,24 @@ def _decision_reply(behavior: str, reason: str = "") -> dict[str, Any]:
     return out
 
 
+def _extend_path() -> None:
+    """Make user-installed agent binaries visible even under systemd's minimal PATH."""
+    import os
+
+    home = Path.home()
+    extra = [home / ".local" / "bin", home / ".opencode" / "bin", home / ".cargo" / "bin"]
+    nvm = home / ".nvm" / "versions" / "node"
+    if nvm.exists():
+        extra += sorted((d / "bin" for d in nvm.iterdir()), reverse=True)
+    current = os.environ.get("PATH", "")
+    parts = [str(p) for p in extra if p.exists() and str(p) not in current]
+    if parts:
+        os.environ["PATH"] = ":".join(parts + [current])
+
+
 async def run_node(settings: Settings) -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
+    _extend_path()
     await Node(settings).run()

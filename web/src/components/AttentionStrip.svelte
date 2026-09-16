@@ -44,5 +44,6 @@
   .n { font-size: 30px; line-height: 1.15; font-weight: 600; color: var(--signal); min-width: 36px; }
   .lead { font-weight: 500; }
   .lead a { margin-left: 8px; font-weight: 400; }
-  .which { display: block; color: var(--ink); }
+  .which { display: block; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .body { min-width: 0; flex: 1; }
 </style>

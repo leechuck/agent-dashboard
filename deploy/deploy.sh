@@ -27,7 +27,11 @@ units="agentdash-node.service"
 for u in $units; do cp deploy/systemd/$u ~/.config/systemd/user/$u; done
 systemctl --user daemon-reload
 for u in $units; do
-  case $u in *.service) [ "$u" = agentsview-sync.service ] || systemctl --user enable --now "$u" >/dev/null 2>&1 || true; systemctl --user restart "$u" 2>/dev/null || true;; *.timer) systemctl --user enable --now "$u" >/dev/null;; esac
+  case $u in
+    agentsview-sync.service) ;;  # oneshot, driven by its timer
+    *.service) systemctl --user enable "$u" >/dev/null 2>&1 || true; systemctl --user restart "$u" 2>/dev/null || true;;
+    *.timer) systemctl --user enable --now "$u" >/dev/null;;
+  esac
 done
 sleep 2
 for u in $units; do printf '%-26s %s\n' "$u" "$(systemctl --user is-active "$u")"; done

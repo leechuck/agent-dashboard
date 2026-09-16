@@ -9,8 +9,8 @@ export function ago(ms: number | null | undefined, now = Date.now()): string {
   return `${Math.round(h / 24)} d`
 }
 
-export function shortCwd(cwd: string): string {
-  return cwd.replace(/^\/home\/[^/]+/, '~')
+export function shortCwd(cwd: string | null | undefined): string {
+  return (cwd ?? '').replace(/^\/home\/[^/]+/, '~')
 }
 
 export function statusLabel(s: string, waitingFor = ''): string {

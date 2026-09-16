@@ -3,6 +3,7 @@
   import { ago, shortCwd, statusLabel } from '../lib/format'
   let { session, selected }: { session: Session; selected: boolean } = $props()
   const s = $derived(session)
+  const stale = $derived(s.status === 'waiting' && Date.now() - s.updated_at > 48 * 3600 * 1000)
 </script>
 
 <li class={`row ${s.status}`} class:selected>
@@ -13,7 +14,7 @@
       <span class="age muted">{ago(s.updated_at)}</span>
     </div>
     <div class="mid muted small">{shortCwd(s.cwd)}</div>
-    <div class="state small">{statusLabel(s.status, s.waiting_for)}</div>
+    <div class="state small" class:stale>{stale ? `waiting since ${ago(s.updated_at)}` : statusLabel(s.status, s.waiting_for)}</div>
     {#if s.last_line}
       <div class="last small">{s.last_line}</div>
     {/if}
@@ -29,11 +30,13 @@
   a { display: block; padding: 10px 16px 12px 13px; color: inherit; text-decoration: none; }
   a:hover { background: var(--page); text-decoration: none; }
   .top { display: flex; gap: 8px; align-items: baseline; }
-  .name { font-weight: 600; }
+  .name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .harness { color: var(--muted); font-size: 13px; }
-  .age { margin-left: auto; font-size: 13px; }
+  .age { margin-left: auto; font-size: 13px; white-space: nowrap; flex: none; }
   .state { margin-top: 2px; }
   .waiting .state { color: var(--signal); font-weight: 500; }
+  .waiting .state.stale { color: var(--muted); font-weight: 400; }
+  .row.waiting:has(.state.stale) { border-left-color: var(--hairline); }
   .busy .state { color: var(--cobalt); }
   .last { margin-top: 4px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   @keyframes pulse { 0%, 100% { border-left-color: var(--cobalt); } 50% { border-left-color: var(--cobalt-soft); } }

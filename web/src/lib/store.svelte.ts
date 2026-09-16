@@ -54,8 +54,10 @@ class Fleet {
     return Object.values(this.sessions).sort(bySeverity)
   }
 
+  /** Sessions that need Robert now: waiting and touched within two days. */
   get waiting(): Session[] {
-    return this.sessionList.filter((s) => s.status === 'waiting')
+    const cutoff = Date.now() - 48 * 3600 * 1000
+    return this.sessionList.filter((s) => s.status === 'waiting' && s.updated_at > cutoff)
   }
 
   get pendingDecisions(): Decision[] {
