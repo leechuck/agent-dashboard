@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # hub
     hub_host: str = "127.0.0.1"
     hub_port: int = 8790
+    # clients allowed to reach the hub: loopback + Tailscale CGNAT/ULA ranges
+    hub_allowed_cidrs: list[str] = Field(
+        default_factory=lambda: ["127.0.0.0/8", "::1/128", "100.64.0.0/10", "fd7a:115c:a1e0::/48"]
+    )
     hub_db: Path = STATE_DIR / "hub.db"
     web_token: str = ""  # empty = no auth (dev only)
     node_token: str = ""  # shared secret for node websocket

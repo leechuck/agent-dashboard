@@ -38,6 +38,13 @@ def _authorized(ws: WebSocket, token: str) -> bool:
 async def nodes_ws(ws: WebSocket) -> None:
     state: HubState = ws.app.state.hub
     token: str = ws.app.state.settings.node_token
+    from .clientguard import client_allowed
+
+    if not client_allowed(
+        ws.client.host if ws.client else None, ws.app.state.settings.hub_allowed_cidrs
+    ):
+        await ws.close(code=4403)
+        return
     if not _authorized(ws, token):
         await ws.close(code=4401)
         return

@@ -15,6 +15,7 @@ from ..db import Database
 from .api import router as api_router
 from .auth import COOKIE
 from .bus import EventBus
+from .clientguard import ClientGuard
 from .history_proxy import router as history_router
 from .push import Pusher
 from .state import HubState
@@ -44,6 +45,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="agentdash hub", lifespan=lifespan)
     app.state.settings = settings
     app.state.hub = HubState(db, bus, Pusher(settings.state_dir))
+    app.add_middleware(ClientGuard, cidrs=settings.hub_allowed_cidrs)
     app.include_router(api_router)
     app.include_router(ws_router)
     app.include_router(history_router)
