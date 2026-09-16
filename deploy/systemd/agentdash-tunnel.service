@@ -1,0 +1,13 @@
+[Unit]
+Description=SSH tunnel to the agentdash hub on ws (interim until Tailscale)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh -N -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -L 127.0.0.1:8790:127.0.0.1:8790 ws
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

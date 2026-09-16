@@ -15,6 +15,7 @@ from ..db import Database
 from .api import router as api_router
 from .auth import COOKIE
 from .bus import EventBus
+from .history_proxy import router as history_router
 from .push import Pusher
 from .state import HubState
 from .ws_nodes import router as ws_router
@@ -32,8 +33,12 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        import httpx
+
         await db.open()
+        app.state.history_client = httpx.AsyncClient(timeout=30)
         yield
+        await app.state.history_client.aclose()
         await db.close()
 
     app = FastAPI(title="agentdash hub", lifespan=lifespan)
@@ -41,6 +46,7 @@ def create_app() -> FastAPI:
     app.state.hub = HubState(db, bus, Pusher(settings.state_dir))
     app.include_router(api_router)
     app.include_router(ws_router)
+    app.include_router(history_router)
 
     @app.post("/login")
     async def login(request: Request) -> Response:

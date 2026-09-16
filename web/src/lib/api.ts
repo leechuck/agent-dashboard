@@ -11,6 +11,7 @@ async function j<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  config: () => j<{ history_public_url: string; history_enabled: boolean }>('/api/config'),
   machines: () => j<Machine[]>('/api/machines'),
   sessions: (active = false) => j<Session[]>(`/api/sessions?active=${active}`),
   session: (key: string) => j<Session>(`/api/sessions/${encodeURIComponent(key)}`),

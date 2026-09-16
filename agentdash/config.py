@@ -28,8 +28,9 @@ class Settings(BaseSettings):
     hub_db: Path = STATE_DIR / "hub.db"
     web_token: str = ""  # empty = no auth (dev only)
     node_token: str = ""  # shared secret for node websocket
-    history_url: str = "http://127.0.0.1:8080"  # agentsview
+    history_url: str = "http://127.0.0.1:8080"  # agentsview API, proxied under /history
     history_token: str = ""
+    history_public_url: str = ""  # agentsview UI as reachable from the phone (deep links)
 
     # node
     hub_url: str = "ws://127.0.0.1:8790/nodes"

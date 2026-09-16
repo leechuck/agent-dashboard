@@ -9,6 +9,7 @@
   <span class="link" class:live={fleet.connected} title={fleet.connected ? 'live updates on' : 'reconnecting'}></span>
   <nav>
     <a href="#/decisions" class:hot={pending > 0}>Decisions{pending > 0 ? ` ${pending}` : ''}</a>
+    <a href="#/history">History</a>
     <a href="#/settings">Settings</a>
   </nav>
   {#if pending === 0 && waiting > 0}

@@ -7,6 +7,7 @@
   import TopBar from './components/TopBar.svelte'
   import Decisions from './components/Decisions.svelte'
   import Settings from './components/Settings.svelte'
+  import History from './components/History.svelte'
 
   let route = $state(parse(location.hash))
 
@@ -15,6 +16,8 @@
     if (h === 'login') return { page: 'login' }
     if (h === 'settings') return { page: 'settings' }
     if (h.startsWith('decisions')) return { page: 'decisions' }
+    if (h.startsWith('history/')) return { page: 'history', key: decodeURIComponent(h.slice(8)) }
+    if (h === 'history') return { page: 'history' }
     if (h.startsWith('session/')) return { page: 'session', key: decodeURIComponent(h.slice(8)) }
     return { page: 'fleet' }
   }
@@ -50,6 +53,8 @@
           <Decisions />
         {:else if route.page === 'settings'}
           <Settings />
+        {:else if route.page === 'history'}
+          <History id={route.key} />
         {:else if route.key}
           <SessionView key={route.key} />
         {:else}
@@ -60,6 +65,8 @@
       <Decisions />
     {:else if route.page === 'settings'}
       <Settings />
+    {:else if route.page === 'history'}
+      <History id={route.key} />
     {:else if route.page === 'session' && route.key}
       <SessionView key={route.key} />
     {:else}

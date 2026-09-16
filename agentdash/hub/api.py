@@ -19,6 +19,12 @@ def _state(request: Request) -> HubState:
     return request.app.state.hub
 
 
+@router.get("/config")
+async def config(request: Request):
+    s = request.app.state.settings
+    return {"history_public_url": s.history_public_url, "history_enabled": bool(s.history_url)}
+
+
 @router.get("/machines")
 async def machines(request: Request):
     return [m.model_dump() for m in await _state(request).db.list_machines()]
