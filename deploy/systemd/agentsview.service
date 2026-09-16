@@ -4,7 +4,8 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/agentsview serve --no-browser --host 127.0.0.1 --port 8080
+EnvironmentFile=-%h/.agentdash/.env
+ExecStart=/bin/sh -c 'exec %h/.local/bin/agentsview serve --no-browser --host 127.0.0.1 --port 8080 ${AGENTDASH_HISTORY_PUBLIC_URL:+--public-url $AGENTDASH_HISTORY_PUBLIC_URL}'
 Restart=on-failure
 RestartSec=5
 
