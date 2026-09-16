@@ -69,3 +69,24 @@ def uninstall(settings_path: Path) -> dict[str, Any]:
         settings.pop("hooks", None)
     settings_path.write_text(json.dumps(settings, indent=2) + "\n")
     return settings
+
+
+STATUSLINE_MARK = "agentdash.hooks.statusline"
+
+
+def install_statusline(settings_path: Path) -> dict[str, Any]:
+    """Wrap the existing statusLine command so rate limits get recorded."""
+    settings: dict[str, Any] = {}
+    if settings_path.exists():
+        shutil.copy2(settings_path, settings_path.with_suffix(".json.bak-agentdash"))
+        settings = json.loads(settings_path.read_text() or "{}")
+    current = settings.get("statusLine") or {}
+    cmd = current.get("command", "") if current.get("type", "command") == "command" else ""
+    if STATUSLINE_MARK in cmd:
+        return settings
+    wrapper = f"{sys.executable} -m agentdash.hooks.statusline"
+    if cmd:
+        wrapper += " " + cmd
+    settings["statusLine"] = {"type": "command", "command": wrapper}
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+    return settings

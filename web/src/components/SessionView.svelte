@@ -4,6 +4,7 @@
   import { shortCwd, statusLabel } from '../lib/format'
   import MessageItem from './MessageItem.svelte'
   import Composer from './Composer.svelte'
+  import SessionActions from './SessionActions.svelte'
 
   let { key }: { key: string } = $props()
   const session = $derived(fleet.sessions[key])
@@ -59,10 +60,11 @@
     <a class="back" href="#/">← Fleet</a>
     <div class="title">
       <span class="name">{session.name || session.session_id.slice(0, 8)}</span>
-      <span class="muted small">{session.harness} on {session.machine}</span>
+      <span class="muted small">{session.harness} on {session.machine}{session.kind === 'background' ? ' · background' : ''}</span>
     </div>
     <div class={`state small ${session.status}`}>{statusLabel(session.status, session.waiting_for)}</div>
     <div class="cwd muted small">{shortCwd(session.cwd)}</div>
+    <SessionActions {session} />
     <div class="tools small">
       <label><input type="checkbox" bind:checked={showThinking} /> thinking</label>
       <label><input type="checkbox" bind:checked={showMeta} /> system context</label>

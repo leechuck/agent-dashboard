@@ -89,5 +89,25 @@ def install_hooks(
             typer.echo(f"installed agentdash hooks into {path}")
 
 
+@install_app.command("statusline")
+def install_statusline_cmd(
+    config_dir: list[str] = typer.Option(None, help="Claude config dir(s)"),
+) -> None:
+    """Wrap the Claude status line so rate-limit windows are recorded for the node."""
+    from pathlib import Path
+
+    from .install.hooks import install_statusline
+
+    s = get_settings()
+    dirs = (
+        [Path(d).expanduser() for d in config_dir]
+        if config_dir
+        else [d for d in s.claude_config_dirs if d.exists()]
+    )
+    for d in dirs:
+        install_statusline(d / "settings.json")
+        typer.echo(f"statusline sidecar installed into {d / 'settings.json'}")
+
+
 if __name__ == "__main__":
     app()

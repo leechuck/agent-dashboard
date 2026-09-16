@@ -1,11 +1,12 @@
 import { api, subscribe } from './api'
-import type { BusEvent, Decision, Machine, Message, Session } from './types'
+import type { BusEvent, Decision, Machine, Message, Session, UsageWindow } from './types'
 
 class Fleet {
   machines = $state<Record<string, Machine>>({})
   sessions = $state<Record<string, Session>>({})
   messages = $state<Record<string, Message[]>>({})
   decisions = $state<Record<string, Decision>>({})
+  usage = $state<UsageWindow[]>([])
   connected = $state(false)
   loaded = $state(false)
   error = $state('')
@@ -13,10 +14,11 @@ class Fleet {
 
   async load() {
     try {
-      const [ms, ss, ds] = await Promise.all([api.machines(), api.sessions(), api.decisions()])
+      const [ms, ss, ds, us] = await Promise.all([api.machines(), api.sessions(), api.decisions(), api.usage()])
       this.machines = Object.fromEntries(ms.map((m) => [m.id, m]))
       this.sessions = Object.fromEntries(ss.map((s) => [s.key, s]))
       this.decisions = Object.fromEntries(ds.map((d) => [d.id, d]))
+      this.usage = us
       this.loaded = true
       this.error = ''
     } catch (e) {
@@ -36,6 +38,10 @@ class Fleet {
     } else if (e.kind === 'decision.updated') {
       const d = e.data as Decision
       this.decisions[d.id] = d
+    } else if (e.kind === 'usage.updated') {
+      const incoming = e.data as UsageWindow[]
+      const keep = this.usage.filter((u) => !incoming.some((n) => n.provider === u.provider && n.window === u.window))
+      this.usage = [...keep, ...incoming].sort((a, b) => a.provider.localeCompare(b.provider) || a.window.localeCompare(b.window))
     } else if (e.kind === 'session.messages') {
       const { session_key, messages, reset } = e.data as { session_key: string; messages: Message[]; reset: boolean }
       const cur = reset ? [] : (this.messages[session_key] ?? [])
@@ -58,6 +64,11 @@ class Fleet {
   get waiting(): Session[] {
     const cutoff = Date.now() - 48 * 3600 * 1000
     return this.sessionList.filter((s) => s.status === 'waiting' && s.updated_at > cutoff)
+  }
+
+  /** The most-used window, for the header badge. */
+  get worstUsage(): UsageWindow | null {
+    return this.usage.reduce<UsageWindow | null>((w, u) => (!w || u.used_pct > w.used_pct ? u : w), null)
   }
 
   get pendingDecisions(): Decision[] {

@@ -8,13 +8,17 @@
   import Decisions from './components/Decisions.svelte'
   import Settings from './components/Settings.svelte'
   import History from './components/History.svelte'
+  import NewSession from './components/NewSession.svelte'
+  import Limits from './components/Limits.svelte'
 
   let route = $state(parse(location.hash))
 
-  function parse(hash: string): { page: string; key?: string } {
+  function parse(hash: string): { page: string; key?: string; q?: URLSearchParams } {
     const h = hash.replace(/^#\/?/, '')
+    if (h.startsWith('new')) return { page: 'new', q: new URLSearchParams(h.split('?')[1] ?? '') }
     if (h === 'login') return { page: 'login' }
     if (h === 'settings') return { page: 'settings' }
+    if (h === 'limits') return { page: 'limits' }
     if (h.startsWith('decisions')) return { page: 'decisions' }
     if (h.startsWith('history/')) return { page: 'history', key: decodeURIComponent(h.slice(8)) }
     if (h === 'history') return { page: 'history' }
@@ -55,6 +59,10 @@
           <Settings />
         {:else if route.page === 'history'}
           <History id={route.key} />
+        {:else if route.page === 'limits'}
+          <Limits />
+        {:else if route.page === 'new'}
+          <NewSession machine={route.q?.get('machine') ?? ''} resume={route.q?.get('resume') ?? ''} title={route.q?.get('cwd') ?? ''} />
         {:else if route.key}
           <SessionView key={route.key} />
         {:else}
@@ -67,6 +75,10 @@
       <Settings />
     {:else if route.page === 'history'}
       <History id={route.key} />
+    {:else if route.page === 'limits'}
+      <Limits />
+    {:else if route.page === 'new'}
+      <NewSession machine={route.q?.get('machine') ?? ''} resume={route.q?.get('resume') ?? ''} title={route.q?.get('cwd') ?? ''} />
     {:else if route.page === 'session' && route.key}
       <SessionView key={route.key} />
     {:else}

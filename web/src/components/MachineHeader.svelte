@@ -22,6 +22,7 @@
   {:else}
     <span class="state">{count} session{count === 1 ? '' : 's'}</span>
   {/if}
+  <a class="newbtn" href={`#/new?machine=${encodeURIComponent(id)}`} title="Start a background session here">+ new</a>
   <button class="arm" class:on={armed} disabled={busy || !m?.online} onclick={toggle}
     title={armed ? 'Approvals go to your phone. Click to send them back to the terminal.' : 'Send approvals to your phone'}>
     {#if armed}
@@ -47,6 +48,7 @@
   .name { font-weight: 600; font-size: 17px; }
   .state { color: var(--muted); font-size: 13px; }
   .state.off { color: var(--signal); }
-  .arm { margin-left: auto; font-size: 13px; padding: 4px 10px; color: var(--muted); }
+  .newbtn { margin-left: auto; font-size: 13px; }
+  .arm { font-size: 13px; padding: 4px 10px; color: var(--muted); }
   .arm.on { color: var(--signal); border-color: var(--signal); background: var(--signal-soft); }
 </style>

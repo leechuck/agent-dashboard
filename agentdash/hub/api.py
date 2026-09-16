@@ -143,6 +143,62 @@ async def session_prompt(key: str, body: PromptBody, request: Request):
         raise HTTPException(504, "node did not answer") from e
 
 
+class ActionBody(BaseModel):
+    action: str  # stop | rm | respawn | terminate | kill
+
+
+@router.post("/sessions/{key}/action")
+async def session_action(key: str, body: ActionBody, request: Request):
+    st = _state(request)
+    if not await st.db.get_session(key):
+        raise HTTPException(404, "unknown session")
+    try:
+        return await st.session_action(key, body.action)
+    except TimeoutError as e:
+        raise HTTPException(504, "node did not answer") from e
+
+
+class StartBody(BaseModel):
+    cwd: str
+    prompt: str = ""
+    name: str = ""
+    resume: str = ""
+    permission_mode: str = ""
+    provider: str = "anthropic"
+
+
+@router.post("/machines/{machine_id}/sessions")
+async def start_session(machine_id: str, body: StartBody, request: Request):
+    st = _state(request)
+    try:
+        return await st.session_start(machine_id, body.model_dump())
+    except TimeoutError as e:
+        raise HTTPException(504, "node did not answer") from e
+
+
+@router.get("/machines/{machine_id}/dirs")
+async def machine_dirs(machine_id: str, request: Request):
+    """Recently used working directories on a machine, most recent first."""
+    seen: dict[str, int] = {}
+    for s in await _state(request).db.list_sessions(machine_id, limit=2000):
+        if s.cwd and not s.cwd.startswith("/tmp/"):
+            seen[s.cwd] = max(seen.get(s.cwd, 0), s.updated_at)
+    return [d for d, _ in sorted(seen.items(), key=lambda kv: -kv[1])][:40]
+
+
+@router.get("/usage")
+async def usage(request: Request):
+    return [w.model_dump() for w in await _state(request).db.latest_usage()]
+
+
+@router.get("/usage/history")
+async def usage_history(request: Request, provider: str, window: str, hours: int = 48):
+    from ..models import now_ms as _now
+
+    pts = await _state(request).db.usage_history(provider, window, _now() - hours * 3600 * 1000)
+    return [{"t": t, "pct": p} for t, p in pts]
+
+
 @router.get("/events/recent")
 async def recent_events(request: Request, limit: int = 50):
     return await _state(request).db.list_events(limit)

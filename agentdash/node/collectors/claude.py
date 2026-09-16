@@ -64,6 +64,7 @@ class ClaudeCollector:
                 "claude",
                 "agents",
                 "--json",
+                "--all",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,

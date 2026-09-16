@@ -14,11 +14,13 @@ from ..models import (
     NODE_HELLO,
     NODE_MESSAGES,
     NODE_SESSIONS,
+    NODE_USAGE,
     Decision,
     Frame,
     Machine,
     Message,
     Session,
+    UsageWindow,
     now_ms,
 )
 from .state import HubState, NodeLink
@@ -100,6 +102,10 @@ async def nodes_ws(ws: WebSocket) -> None:
                         "messages": [m.model_dump() for m in msgs],
                         "reset": reset,
                     },
+                )
+            elif frame.type == NODE_USAGE:
+                await state.usage_snapshot(
+                    [UsageWindow.model_validate(w) for w in p.get("windows", [])]
                 )
             elif frame.type == NODE_DECISION_CREATED:
                 await state.decision_created(Decision.model_validate(p))

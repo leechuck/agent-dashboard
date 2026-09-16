@@ -74,3 +74,16 @@ export interface BusEvent {
   kind: string
   data: any
 }
+
+export interface UsageWindow {
+  provider: string
+  account: string
+  window: string
+  label: string
+  used_pct: number
+  resets_at: number | null
+  source: string
+  machine: string
+  fetched_at: number
+  detail: Record<string, any>
+}

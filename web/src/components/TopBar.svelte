@@ -2,6 +2,7 @@
   import { fleet } from '../lib/store.svelte'
   const pending = $derived(fleet.pendingDecisions.length)
   const waiting = $derived(fleet.waiting.length)
+  const worst = $derived(fleet.worstUsage)
 </script>
 
 <header>
@@ -9,6 +10,7 @@
   <span class="link" class:live={fleet.connected} title={fleet.connected ? 'live updates on' : 'reconnecting'}></span>
   <nav>
     <a href="#/decisions" class:hot={pending > 0}>Decisions{pending > 0 ? ` ${pending}` : ''}</a>
+    <a href="#/limits" class:warn={!!worst && worst.used_pct >= 80}>Limits{worst ? ` ${worst.used_pct.toFixed(0)}%` : ''}</a>
     <a href="#/history">History</a>
     <a href="#/settings">Settings</a>
   </nav>
@@ -36,5 +38,6 @@
   nav { margin-left: auto; display: flex; gap: 14px; font-size: 14px; }
   nav a { color: var(--muted); }
   nav a.hot { color: var(--signal); font-weight: 600; }
+  nav a.warn { color: var(--amber); font-weight: 600; }
   .count { color: var(--signal); font-size: 13px; }
 </style>

@@ -8,7 +8,15 @@ from typing import Any
 
 import aiosqlite
 
-from .models import Decision, DecisionStatus, Machine, Session, SessionStatus, now_ms
+from .models import (
+    Decision,
+    DecisionStatus,
+    Machine,
+    Session,
+    SessionStatus,
+    UsageWindow,
+    now_ms,
+)
 
 TERMINAL = ("done", "failed", "stopped", "offline")
 
@@ -24,6 +32,12 @@ CREATE TABLE IF NOT EXISTS decisions (
   machine TEXT, session_key TEXT, status TEXT, created_at INTEGER, data TEXT
 );
 CREATE INDEX IF NOT EXISTS decisions_status ON decisions(status, created_at);
+CREATE TABLE IF NOT EXISTS usage_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider TEXT, machine TEXT, window TEXT, used_pct REAL, resets_at INTEGER,
+  fetched_at INTEGER, data TEXT
+);
+CREATE INDEX IF NOT EXISTS usage_pw ON usage_snapshots(provider, window, fetched_at);
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   endpoint TEXT PRIMARY KEY, data TEXT, created_at INTEGER, label TEXT
 );
@@ -189,6 +203,49 @@ class Database:
                 await self.upsert_decision(d)
                 out.append(d)
         return out
+
+    # usage ------------------------------------------------------------
+    async def add_usage(self, w: UsageWindow) -> None:
+        await self.db.execute(
+            """INSERT INTO usage_snapshots(provider,machine,window,used_pct,resets_at,
+                 fetched_at,data) VALUES(?,?,?,?,?,?,?)""",
+            (
+                w.provider,
+                w.machine,
+                w.window,
+                w.used_pct,
+                w.resets_at,
+                w.fetched_at,
+                w.model_dump_json(),
+            ),
+        )
+        await self.db.commit()
+
+    async def latest_usage(self) -> list[UsageWindow]:
+        """Newest snapshot per (provider, window), whichever machine reported it."""
+        cur = await self.db.execute(
+            """SELECT data FROM usage_snapshots u
+               WHERE fetched_at = (SELECT MAX(fetched_at) FROM usage_snapshots
+                                   WHERE provider=u.provider AND window=u.window)
+               ORDER BY provider, window"""
+        )
+        return [UsageWindow.model_validate_json(r["data"]) for r in await cur.fetchall()]
+
+    async def usage_history(
+        self, provider: str, window: str, since_ms: int
+    ) -> list[tuple[int, float]]:
+        cur = await self.db.execute(
+            """SELECT fetched_at, used_pct FROM usage_snapshots
+               WHERE provider=? AND window=? AND fetched_at>=? ORDER BY fetched_at""",
+            (provider, window, since_ms),
+        )
+        return [(r["fetched_at"], r["used_pct"]) for r in await cur.fetchall()]
+
+    async def prune_usage(self, keep_ms: int) -> None:
+        await self.db.execute(
+            "DELETE FROM usage_snapshots WHERE fetched_at < ?", (now_ms() - keep_ms,)
+        )
+        await self.db.commit()
 
     # push subscriptions -----------------------------------------------
     async def add_push_subscription(self, sub: dict[str, Any], label: str = "") -> None:

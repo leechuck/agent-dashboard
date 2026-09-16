@@ -1,4 +1,4 @@
-import type { BusEvent, Decision, Machine, Message, Session } from './types'
+import type { BusEvent, Decision, Machine, Message, Session, UsageWindow } from './types'
 
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } })
@@ -32,6 +32,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ behavior, remember, reason }),
     }),
+  action: (key: string, action: string) =>
+    j<{ ok: boolean; error?: string; output?: string }>(`/api/sessions/${encodeURIComponent(key)}/action`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    }),
+  startSession: (machine: string, spec: { cwd: string; prompt?: string; name?: string; resume?: string; permission_mode?: string }) =>
+    j<{ ok: boolean; error?: string; job_id?: string; output?: string }>(`/api/machines/${encodeURIComponent(machine)}/sessions`, {
+      method: 'POST',
+      body: JSON.stringify(spec),
+    }),
+  dirs: (machine: string) => j<string[]>(`/api/machines/${encodeURIComponent(machine)}/dirs`),
+  usage: () => j<UsageWindow[]>('/api/usage'),
+  usageHistory: (provider: string, window: string, hours = 48) =>
+    j<{ t: number; pct: number }[]>(`/api/usage/history?${new URLSearchParams({ provider, window, hours: String(hours) })}`),
   pushKey: () => j<{ key: string; enabled: boolean }>('/api/push/key'),
   pushSubscribe: (subscription: unknown, label: string) =>
     j<{ ok: boolean }>('/api/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription, label }) }),

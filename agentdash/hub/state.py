@@ -15,12 +15,15 @@ from ..models import (
     HUB_ARM,
     HUB_DECISION_ANSWER,
     HUB_SEND_PROMPT,
+    HUB_SESSION_ACTION,
+    HUB_SESSION_START,
     HUB_SUBSCRIBE,
     HUB_UNSUBSCRIBE,
     Decision,
     DecisionStatus,
     Frame,
     Message,
+    UsageWindow,
     now_ms,
 )
 from .bus import EventBus
@@ -45,6 +48,7 @@ class HubState:
         self.nodes: dict[str, NodeLink] = {}
         self.caches: dict[str, deque[Message]] = {}
         self.pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        self._usage_alerted: dict[str, int] = {}  # provider:window -> threshold pushed
 
     def node_for(self, session_key: str) -> NodeLink | None:
         machine = session_key.split(":", 1)[0]
@@ -160,6 +164,27 @@ class HubState:
         self.bus.publish("decision.updated", d.model_dump())
         return {"ok": True}
 
+    async def usage_snapshot(self, windows: list[UsageWindow]) -> None:
+        for w in windows:
+            await self.db.add_usage(w)
+            key = f"{w.provider}:{w.window}"
+            level = 95 if w.used_pct >= 95 else 80 if w.used_pct >= 80 else 0
+            if level and self._usage_alerted.get(key, 0) < level:
+                self._usage_alerted[key] = level
+                when = ""
+                if w.resets_at:
+                    mins = max(0, (w.resets_at - now_ms()) // 60000)
+                    when = f", resets in {mins // 60} h {mins % 60} min"
+                await self.notify(
+                    f"{w.provider} {w.label} at {w.used_pct:.0f}%",
+                    f"{level}% threshold crossed{when}",
+                    "/#/limits",
+                    tag=f"usage-{key}",
+                )
+            elif not level:
+                self._usage_alerted.pop(key, None)
+        self.bus.publish("usage.updated", [w.model_dump() for w in windows])
+
     async def on_node_event(self, machine: str, p: dict[str, Any]) -> None:
         kind = p.get("kind", "")
         if kind in ("claude.permission_prompt", "claude.agent_needs_input") and not p.get("armed"):
@@ -172,6 +197,20 @@ class HubState:
                 f"/#/session/{key}",
                 tag=key,
             )
+
+    async def session_action(self, session_key: str, action: str) -> dict[str, Any]:
+        link = self.node_for(session_key)
+        if not link:
+            return {"ok": False, "error": "machine offline"}
+        return await self.request(
+            link, HUB_SESSION_ACTION, {"session_key": session_key, "action": action}, timeout=90
+        )
+
+    async def session_start(self, machine: str, spec: dict[str, Any]) -> dict[str, Any]:
+        link = self.nodes.get(machine)
+        if not link:
+            return {"ok": False, "error": "machine offline"}
+        return await self.request(link, HUB_SESSION_START, spec, timeout=120)
 
     async def send_prompt(self, session_key: str, text: str) -> dict[str, Any]:
         link = self.node_for(session_key)

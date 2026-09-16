@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     tail_lines: int = 200
     decision_timeout: float = 1770.0  # seconds; keep below the hook timeout (1800)
     arm_hours: float = 12.0
+    usage_interval: float = 600.0  # seconds between usage polls (plus jitter)
 
     @property
     def state_dir(self) -> Path:

@@ -15,6 +15,8 @@ from ..models import (
     HUB_DECISION_ANSWER,
     HUB_PING,
     HUB_SEND_PROMPT,
+    HUB_SESSION_ACTION,
+    HUB_SESSION_START,
     HUB_SUBSCRIBE,
     HUB_UNSUBSCRIBE,
     NODE_DECISION_CREATED,
@@ -23,6 +25,7 @@ from ..models import (
     NODE_MESSAGES,
     NODE_PONG,
     NODE_SESSIONS,
+    NODE_USAGE,
     Decision,
     DecisionStatus,
     Frame,
@@ -31,9 +34,11 @@ from ..models import (
     SessionStatus,
     now_ms,
 )
+from .adapters.claude_cli import job_action, kill_process, start_background
 from .adapters.claude_socket import SocketSendError, send_user_message
 from .adapters.claude_transcript import TranscriptTail, read_last
 from .collectors.claude import ClaudeCollector
+from .collectors.usage import UsageCollector
 from .decisions import DecisionManager
 from .hookserver import serve_hooks
 from .hubclient import HubClient
@@ -48,6 +53,7 @@ class Node:
         self.s = settings
         self.machine = settings.machine_id
         self.claude = ClaudeCollector(self.machine, settings.claude_config_dirs)
+        self.usage = UsageCollector(self.machine, settings.claude_config_dirs, settings.state_dir)
         self.sessions: dict[str, Session] = {}
         self.tails: dict[str, TranscriptTail] = {}
         self.hub = HubClient(settings.hub_url, settings.node_token, self.on_hub_frame)
@@ -78,6 +84,10 @@ class Node:
             await self.send_prompt(
                 p.get("session_key", ""), p.get("text", ""), p.get("request_id", "")
             )
+        elif frame.type == HUB_SESSION_ACTION:
+            await self.session_action(p)
+        elif frame.type == HUB_SESSION_START:
+            await self.session_start(p)
         elif frame.type == HUB_ARM:
             self.armed = bool(p.get("armed"))
             self.armed_until = int(p.get("armed_until") or 0)
@@ -228,6 +238,49 @@ class Node:
             result["error"] = f"no send channel for {sess.harness}"
         await self.hub.send(NODE_EVENT, {"kind": "prompt.result", **result})
 
+    async def session_action(self, p: dict[str, Any]) -> None:
+        key, action, rid = p.get("session_key", ""), p.get("action", ""), p.get("request_id", "")
+        sess = self.sessions.get(key)
+        result: dict[str, Any] = {"session_key": key, "request_id": rid, "ok": False}
+        if not sess:
+            result["error"] = "unknown session"
+        elif sess.harness != "claude":
+            result["error"] = f"no actions for {sess.harness} yet"
+        elif action in ("stop", "rm", "respawn", "logs"):
+            job_id = sess.extra.get("job_id")
+            if job_id:
+                result.update(await job_action(action, job_id, sess.extra.get("config_dir")))
+            elif action == "stop" and sess.pid:
+                result.update(kill_process(sess.pid))
+            else:
+                result["error"] = "not a background session"
+        elif action in ("terminate", "kill"):
+            if sess.pid:
+                result.update(kill_process(sess.pid, hard=action == "kill"))
+            else:
+                result["error"] = "no live process"
+        else:
+            result["error"] = f"unknown action {action}"
+        self._refresh.set()
+        await self.hub.send(NODE_EVENT, {"kind": "action.result", "action": action, **result})
+
+    async def session_start(self, p: dict[str, Any]) -> None:
+        rid = p.get("request_id", "")
+        config_dir = None
+        for d in self.s.claude_config_dirs:
+            if p.get("provider", "anthropic") == (d.name.removeprefix(".claude-") or "anthropic"):
+                config_dir = str(d)
+        result = await start_background(
+            p.get("cwd", ""),
+            p.get("prompt", ""),
+            name=p.get("name", ""),
+            resume=p.get("resume", ""),
+            permission_mode=p.get("permission_mode", ""),
+            config_dir=config_dir,
+        )
+        self._refresh.set()
+        await self.hub.send(NODE_EVENT, {"kind": "start.result", "request_id": rid, **result})
+
     # loops ------------------------------------------------------------
     def _apply_hints(self, sessions: list[Session]) -> None:
         cutoff = now_ms() - 6 * 3600 * 1000
@@ -273,6 +326,19 @@ class Node:
                     )
             await asyncio.sleep(1.0)
 
+    async def usage_loop(self) -> None:
+        import random
+
+        await asyncio.sleep(5)
+        while True:
+            try:
+                windows = await self.usage.collect()
+                if windows:
+                    await self.hub.send(NODE_USAGE, {"windows": [w.model_dump() for w in windows]})
+            except Exception:  # noqa: BLE001
+                log.exception("usage collection failed")
+            await asyncio.sleep(self.s.usage_interval + random.uniform(0, 60))
+
     async def registry_watch(self) -> None:
         """Refresh the roster promptly when Claude's per-pid registry changes."""
         try:
@@ -300,6 +366,7 @@ class Node:
             self.roster_loop(),
             self.tail_loop(),
             self.registry_watch(),
+            self.usage_loop(),
             serve_hooks(self, self.s.node_host, self.s.node_port),
         )
 

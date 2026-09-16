@@ -89,6 +89,9 @@
       <div class="title">{detail.session.first_message || detail.session.id}</div>
       <div class="meta small muted">{detail.session.agent} · {detail.session.machine} · {shortCwd(detail.session.cwd)} · {when(detail.session.started_at)}</div>
       <pre class="mono resume">{resumeCommand(detail.session)}</pre>
+      {#if detail.session.agent === 'claude'}
+        <a class="btn" href={`#/new?resume=${encodeURIComponent(detail.session.source_session_id || detail.session.id)}&cwd=${encodeURIComponent(detail.session.cwd ?? '')}`}>Resume in the background</a>
+      {/if}
       {#if publicUrl}
         <a class="small" href={`${publicUrl}/sessions/${encodeURIComponent(detail.session.id)}`} target="_blank" rel="noopener">Open in agentsview</a>
       {/if}
@@ -157,6 +160,7 @@
   .first { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .dhead { position: sticky; top: 48px; background: var(--surface); border-bottom: 1px solid var(--hairline); padding: 10px 16px; display: grid; gap: 4px; }
   .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .btn { justify-self: start; font-size: 13px; padding: 4px 10px; border: 1px solid var(--cobalt); border-radius: var(--radius); }
   .resume { padding: 6px 10px; background: var(--page); border-radius: var(--radius); user-select: all; }
   .msgs { padding: 8px 0 24px; }
   .msg { padding: 8px 16px; }

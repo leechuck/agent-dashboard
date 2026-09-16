@@ -118,6 +118,21 @@ class Decision(BaseModel):
     remember: bool = False
 
 
+class UsageWindow(BaseModel):
+    """One rate-limit or credit window as seen from a machine."""
+
+    provider: str  # anthropic | openai | openrouter
+    account: str = ""  # plan / label, never a secret
+    window: str  # five_hour | seven_day | primary_10080m | credits | ...
+    label: str = ""
+    used_pct: float = 0.0
+    resets_at: int | None = None  # ms
+    source: str = ""
+    machine: str = ""
+    fetched_at: int = Field(default_factory=now_ms)
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
 # --- node <-> hub frames -------------------------------------------------
 
 
@@ -137,6 +152,7 @@ NODE_EVENT = "event"
 NODE_PONG = "pong"
 NODE_DECISION_CREATED = "decision.created"
 NODE_DECISION_RESOLVED = "decision.resolved"
+NODE_USAGE = "usage.snapshot"
 
 # hub -> node types
 HUB_HELLO_OK = "hello.ok"
@@ -145,4 +161,6 @@ HUB_UNSUBSCRIBE = "messages.unsubscribe"
 HUB_SEND_PROMPT = "session.prompt"
 HUB_PING = "ping"
 HUB_ARM = "machine.arm"
+HUB_SESSION_ACTION = "session.action"
+HUB_SESSION_START = "session.start"
 HUB_DECISION_ANSWER = "decision.answer"
