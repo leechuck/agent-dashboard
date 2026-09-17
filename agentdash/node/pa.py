@@ -22,8 +22,8 @@ import yaml
 
 from ..config import Settings
 from ..models import Session, now_ms
-from .adapters.claude_cli import start_background
 from . import pa_reminders
+from .adapters.claude_cli import start_background
 from .pa_panels import PanelError, Panels
 
 log = logging.getLogger(__name__)
