@@ -32,7 +32,7 @@
       const [path, query] = h.slice(8).split('?')
       const key = decodeURIComponent(path)
       const draft = new URLSearchParams(query ?? '').get('draft')
-      if (draft) fleet.drafts[key] = draft
+      if (draft) fleet.setDraft(key, draft)
       return { page: 'session', key }
     }
     return { page: 'fleet' }

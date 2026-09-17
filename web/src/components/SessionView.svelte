@@ -50,19 +50,31 @@
     return `${session.harness} has no way to receive text from outside, unless it runs inside tmux: start it as "agent-tmux ${cmd}" and this box works.`
   })
 
-  async function send(text: string) {
-    delete fleet.drafts[key]
+  /** Returns whether it was delivered; the box keeps the text when it was not. */
+  async function send(text: string): Promise<boolean> {
+    const target = key
     sendState = 'sending'
     sendError = ''
     try {
-      const r = await api.prompt(key, text)
-      sendState = r.ok ? 'sent' : 'failed'
-      sendError = r.error ?? ''
+      const r = await api.prompt(target, text)
+      if (target === key) {
+        sendState = r.ok ? 'sent' : 'failed'
+        sendError = r.error ?? ''
+      }
+      return r.ok
     } catch (e) {
-      sendState = 'failed'
-      sendError = String(e)
+      if (target === key) {
+        sendState = 'failed'
+        sendError = String(e)
+      }
+      return false
     }
   }
+  $effect(() => {
+    key
+    sendState = 'idle'
+    sendError = ''
+  })
 </script>
 
 <div class="sv">
@@ -107,7 +119,7 @@
     {/each}
   </div>
 
-  <Composer disabled={!canSend} sendState={sendState} error={sendError} onsend={send} draft={fleet.drafts[key] ?? ''}
+  <Composer disabled={!canSend} sendState={sendState} error={sendError} onsend={send} sessionKey={key}
     hint={canSend ? '' : whyNot} />
 {/if}
 </div>

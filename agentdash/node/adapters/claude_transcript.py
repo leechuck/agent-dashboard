@@ -46,6 +46,14 @@ def _content_text(content: Any) -> str:
     return ""
 
 
+_PLUMBING = ("<task-notification", "<local-command", "<command-name", "<command-message")
+
+
+def _is_plumbing(rtype: str, text: str) -> bool:
+    """Harness messages filed under the user's name: task notices, slash-command echoes."""
+    return rtype == "user" and text.lstrip().startswith(_PLUMBING)
+
+
 def parse_record(rec: dict[str, Any]) -> list[Message]:
     """Turn one transcript record into zero or more messages."""
     rtype = rec.get("type")
@@ -58,7 +66,17 @@ def parse_record(rec: dict[str, Any]) -> list[Message]:
         text = rec.get("content") or rec.get("subtype") or ""
         if not text or rec.get("isMeta"):
             return []
-        return [Message(id=uuid, ts=ts, role="system", kind="system", text=str(text)[:2000])]
+        # bare subtypes (turn_duration, stop_hook_summary) are bookkeeping, not conversation
+        return [
+            Message(
+                id=uuid,
+                ts=ts,
+                role="system",
+                kind="system",
+                text=str(text)[:2000],
+                is_meta=not rec.get("content"),
+            )
+        ]
     if rtype not in ("user", "assistant"):
         return []
     msg = rec.get("message") or {}
@@ -72,7 +90,7 @@ def parse_record(rec: dict[str, Any]) -> list[Message]:
                     ts=ts,
                     role="user" if rtype == "user" else "assistant",
                     text=content,
-                    is_meta=bool(rec.get("isMeta")),
+                    is_meta=bool(rec.get("isMeta")) or _is_plumbing(rtype, content),
                     agent_id=agent_id,
                 )
             )
@@ -94,7 +112,7 @@ def parse_record(rec: dict[str, Any]) -> list[Message]:
                     ts=ts,
                     role="user" if rtype == "user" else "assistant",
                     text=text,
-                    is_meta=bool(rec.get("isMeta")),
+                    is_meta=bool(rec.get("isMeta")) or _is_plumbing(rtype, text),
                     agent_id=agent_id,
                 )
             )

@@ -9,7 +9,17 @@ export class Fleet {
   usage = $state<UsageWindow[]>([])
   cockpit = $state<Cockpit | null>(null)
   /** Prompt drafts handed from the cockpit to a session's composer, by session key. */
-  drafts = $state<Record<string, string>>({})
+  drafts = $state<Record<string, string>>(loadDrafts())
+
+  setDraft(key: string, text: string) {
+    if (text) this.drafts[key] = text
+    else delete this.drafts[key]
+    try {
+      localStorage.setItem('drafts', JSON.stringify(this.drafts))
+    } catch {
+      /* private window or full storage: drafts then live for this page only */
+    }
+  }
   connected = $state(false)
   loaded = $state(false)
   error = $state('')
@@ -214,6 +224,15 @@ export class Fleet {
   async arm(machine: string, armed: boolean) {
     const r = await api.arm(machine, armed)
     this.machines[machine] = { ...this.machines[machine], ...r }
+  }
+}
+
+function loadDrafts(): Record<string, string> {
+  try {
+    const d = JSON.parse(localStorage.getItem('drafts') ?? '{}')
+    return d && typeof d === 'object' ? d : {}
+  } catch {
+    return {}
   }
 }
 

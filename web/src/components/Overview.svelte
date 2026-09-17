@@ -134,7 +134,7 @@
     // a new tab has its own store, so the draft travels in the URL there
     if (wide) window.open(`${location.pathname}${location.search}${sessionHref(s.session_key)}?draft=${encodeURIComponent(s.prompt)}`, '_blank', 'noopener')
     else {
-      fleet.drafts[s.session_key] = s.prompt
+      fleet.setDraft(s.session_key, s.prompt)
       location.hash = sessionHref(s.session_key)
     }
   }

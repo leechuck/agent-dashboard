@@ -48,13 +48,19 @@ def create_app() -> FastAPI:
 
         async def retention() -> None:
             while True:
-                try:
-                    await db.prune_usage(settings.keep_usage_days * 86400 * 1000)
-                    await db.prune_events(settings.keep_events_days * 86400 * 1000)
-                    await db.prune_decisions(settings.keep_events_days * 86400 * 1000)
-                    await db.prune_titles(30 * 86400 * 1000)
-                except Exception:  # noqa: BLE001
-                    logging.getLogger(__name__).exception("retention failed")
+                keep = settings.keep_events_days * 86400 * 1000
+                steps = (
+                    db.prune_usage(settings.keep_usage_days * 86400 * 1000),
+                    db.prune_events(keep),
+                    db.prune_decisions(keep),
+                    db.prune_titles(30 * 86400 * 1000),
+                    db.vacuum(),
+                )
+                for step in steps:  # one failing step must not starve the others
+                    try:
+                        await step
+                    except Exception:  # noqa: BLE001
+                        logging.getLogger(__name__).exception("retention step failed")
                 await asyncio.sleep(6 * 3600)
 
         async def titles() -> None:

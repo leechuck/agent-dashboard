@@ -400,3 +400,16 @@ def test_read_last_reads_the_tail_and_grows_until_it_has_enough(tmp_path):
     assert [m.id for m in tail] == [m.id for m in whole] and len(tail) == 50
     assert tail[-1].text.startswith("msg 399")
     assert len(read_last(p, 1000, chunk=1_000)) == 400
+
+
+async def test_retention_steps_run_on_a_real_database(tmp_path):
+    from agentdash.db import Database
+
+    db = Database(tmp_path / "hub.db")
+    await db.open()
+    await db.set_title("k", "t", "b")
+    await db.prune_decisions(1)
+    await db.prune_titles(10**12)
+    await db.vacuum()  # used to raise: cannot VACUUM from within a transaction
+    assert (await db.titles())["k"]["title"] == "t"
+    await db.close()

@@ -342,8 +342,12 @@ class Database:
             "DELETE FROM decisions WHERE status != 'pending' AND created_at < ?",
             (now_ms() - keep_ms,),
         )
-        await self.db.execute("VACUUM")
         await self.db.commit()
+
+    async def vacuum(self) -> None:
+        """Give freed pages back to the disk. SQLite refuses this inside a transaction."""
+        await self.db.commit()
+        await self.db.execute("VACUUM")
 
     async def prune_usage(self, keep_ms: int) -> None:
         await self.db.execute(

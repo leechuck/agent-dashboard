@@ -26,6 +26,7 @@
     <header>
       <span class={`dot ${s.status}`}></span>
       <span class="state">{stale ? 'stale' : statusLabel(s.status, s.waiting_for, !!x.goal)}</span>
+      {#if fleet.drafts[s.key]}<span class="draft" title="You have unsent text for this session">draft</span>{/if}
       <span class="age">{ago(s.updated_at)}</span>
     </header>
     <h3>{displayName(s)}</h3>
@@ -75,6 +76,7 @@
   .state { font-weight: 600; letter-spacing: .02em; color: var(--muted); }
   .busy .state { color: var(--cobalt); }
   .waiting .state { color: var(--signal); }
+  .draft { font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--amber); background: var(--amber-soft); padding: 0 6px; border-radius: 8px; }
   .age { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
   h3 { margin: 2px 0 0; font-size: 17px; line-height: 1.25; font-weight: 600; letter-spacing: -.005em; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .where { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
