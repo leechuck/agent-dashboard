@@ -304,6 +304,14 @@ class HubState:
 
     async def on_node_event(self, machine: str, p: dict[str, Any]) -> None:
         kind = p.get("kind", "")
+        if kind == "claude.login_expired":
+            await self.notify(
+                f"Claude login on {machine} expired",
+                f"{p.get('account') or p.get('dir')}: log in again from Settings",
+                "/#/settings",
+                tag=f"login-{machine}-{p.get('dir')}",
+            )
+            return
         prompts = (
             "claude.permission_prompt",
             "claude.agent_needs_input",

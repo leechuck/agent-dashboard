@@ -107,6 +107,7 @@ class Node:
         self.bridge: dict[str, str] = {}  # claude session_id -> remote-control URL
         self.status_hint: dict[str, tuple[SessionStatus, str, int]] = {}  # key -> (status, why, ts)
         self._refresh = asyncio.Event()
+        self._dead_told: set[str] = set()  # Claude logins already reported as expired
 
     # arming -----------------------------------------------------------
     @property
@@ -550,6 +551,9 @@ class Node:
         self.s.claude_config_dirs = discover_claude_dirs()
         self.claude.config_dirs = [d for d in self.s.claude_config_dirs if d.exists()]
         result = await self.catalog.get(self._endpoints(p), fresh=bool(p.get("fresh")))
+        for login in result.get("logins") or []:
+            if str(Path.home() / login.get("dir", "")) in self.usage.dead_logins:
+                login["logged_in"], login["expired"] = False, True  # its token no longer works
         await self._reply("catalog.result", p, result)
 
     async def login_open(self, p: dict[str, Any]) -> None:
@@ -678,13 +682,13 @@ class Node:
                 await self._stop(sess)  # two agents must never write to one transcript
             bundle, meta = await asyncio.to_thread(past.pack, sess, self.s.state_dir / "transfer")
             blob = secrets.token_hex(16)
+            body = await asyncio.to_thread(bundle.read_bytes)  # gzip: a few MB at most
             async with httpx.AsyncClient(timeout=600) as client:
-                with bundle.open("rb") as f:
-                    r = await client.put(
-                        f"{self._hub_http()}/nodes/blob/{blob}",
-                        content=f,
-                        headers={"Authorization": f"Bearer {self.s.node_token}"},
-                    )
+                r = await client.put(
+                    f"{self._hub_http()}/nodes/blob/{blob}",
+                    content=body,
+                    headers={"Authorization": f"Bearer {self.s.node_token}"},
+                )
             if r.status_code >= 300:
                 raise TransferError(f"hub refused the bundle: {r.status_code} {r.text[:120]}")
             result = {"ok": True, "blob": blob, "stopped": bool(live), **meta}
@@ -693,6 +697,9 @@ class Node:
             }
         except (TransferError, LaunchError, httpx.HTTPError, OSError) as e:
             result = {"ok": False, "error": str(e)[:300]}
+        except Exception as e:  # noqa: BLE001
+            log.exception("export failed")
+            result = {"ok": False, "error": f"{e.__class__.__name__}: {e}"[:300]}
         finally:
             if bundle:
                 bundle.unlink(missing_ok=True)
@@ -744,6 +751,9 @@ class Node:
             result["transcript_path"] = str(path)
         except (TransferError, LaunchError, httpx.HTTPError, OSError, ValueError) as e:
             result = {"ok": False, "error": str(e)[:300]}
+        except Exception as e:  # noqa: BLE001
+            log.exception("import failed")
+            result = {"ok": False, "error": f"{e.__class__.__name__}: {e}"[:300]}
         finally:
             bundle.unlink(missing_ok=True)
         self._refresh.set()
@@ -894,6 +904,17 @@ class Node:
                 windows = await self.usage.collect()
                 if windows:
                     await self.hub.send(NODE_USAGE, {"windows": [w.model_dump() for w in windows]})
+                for d, account in self.usage.dead_logins.items():
+                    if d not in self._dead_told:  # once per node run, not every ten minutes
+                        self._dead_told.add(d)
+                        await self.hub.send(
+                            NODE_EVENT,
+                            {
+                                "kind": "claude.login_expired",
+                                "dir": Path(d).name,
+                                "account": account,
+                            },
+                        )
             except Exception:  # noqa: BLE001
                 log.exception("usage collection failed")
             await asyncio.sleep(self.s.usage_interval + random.uniform(0, 60))

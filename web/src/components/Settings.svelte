@@ -284,7 +284,7 @@
             <div class="lrow">
               <span><b>{l.name}</b> <span class="muted small">~/{l.dir}</span></span>
               <span class={l.logged_in ? 'good small' : 'bad small'}>{l.logged_in ? l.account : 'not logged in'}</span>
-              {#if l.dir !== '.claude'}<button type="button" onclick={() => openLogin(m, l.name)}>{l.logged_in ? 'Log in again' : 'Log in'}</button>{/if}
+              <button type="button" onclick={() => openLogin(m, l.dir === '.claude' ? 'default' : l.name)}>{l.logged_in ? 'Log in again' : 'Log in'}</button>
             </div>
           {/each}
           <div class="lrow">

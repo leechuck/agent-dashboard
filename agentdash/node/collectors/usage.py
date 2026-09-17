@@ -157,6 +157,7 @@ class UsageCollector:
         self.state_dir = state_dir
         self._claude_version = ""
         self._backoff_until: dict[str, float] = {}
+        self.dead_logins: dict[str, str] = {}  # config dir -> account whose token is refused
 
     # ---- Claude -------------------------------------------------------
     def _claude_version_str(self) -> str:
@@ -230,9 +231,16 @@ class UsageCollector:
             self._backoff_until[backoff] = time.time() + 30 * 60
             log.warning("claude usage: rate limited, backing off 30 min")
             return []
+        if r.status_code in (401, 403):
+            # the login is over (token expired and not refreshable): Claude will ask to log
+            # in again; until then this plan has no numbers
+            self.dead_logins[str(config_dir)] = account
+            log.warning("claude usage: %s refuses %s; log in again", r.status_code, config_dir)
+            return []
         if r.status_code != 200:
             log.warning("claude usage: HTTP %s", r.status_code)
             return []
+        self.dead_logins.pop(str(config_dir), None)
         return parse_claude_usage(r.json(), account)
 
     async def claude(self) -> list[UsageWindow]:
