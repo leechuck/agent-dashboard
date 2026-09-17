@@ -62,7 +62,7 @@
   </div>
   {#if result}
     <p class={`small ${result.ok ? 'okmsg' : 'err'}`}>{result.text}
-      {#if result.terminal}<a href={`#/terminal/${encodeURIComponent(result.terminal)}`}>Open its terminal</a>{/if}
+      {#if result.terminal}<a href={`#/terminal/${encodeURIComponent(result.terminal)}?control=1`}>Open its terminal</a>{/if}
     </p>
   {/if}
   <p class="small muted now">Now: {session.harness}{x.account ? ` · ${x.account}` : ''}{session.model ? ` · ${session.model}` : ''}{x.effort ? ` · think ${x.effort}` : ''}</p>

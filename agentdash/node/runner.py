@@ -42,13 +42,13 @@ from ..models import (
     SessionStatus,
     now_ms,
 )
-from . import briefing, commands, past
+from . import briefing, commands, login_screen, past
 from .adapters import codex_rollout, hermes_state, opencode_store, pi_session
 from .adapters.claude_cli import job_action, kill_process
 from .adapters.claude_socket import SocketSendError, send_user_message
 from .adapters.claude_transcript import TranscriptTail, read_last
 from .adapters.claude_transcript import iter_messages as claude_iter
-from .adapters.tmux_keys import TmuxSendError, socket_path, type_prompt
+from .adapters.tmux_keys import TmuxSendError, capture, send_keys, socket_path, type_prompt
 from .catalog import Catalog
 from .collectors.claude import ClaudeCollector
 from .collectors.codex import CodexCollector
@@ -108,6 +108,7 @@ class Node:
         self.status_hint: dict[str, tuple[SessionStatus, str, int]] = {}  # key -> (status, why, ts)
         self._refresh = asyncio.Event()
         self._dead_told: set[str] = set()  # Claude logins already reported as expired
+        self._credentials_changed = asyncio.Event()
 
     # arming -----------------------------------------------------------
     @property
@@ -149,6 +150,10 @@ class Node:
             self._spawn(self.session_export(p))
         elif frame.type == "session.import":
             self._spawn(self.session_import(p))
+        elif frame.type == "pane.screen":
+            self._spawn(self.pane_screen(p))
+        elif frame.type == "pane.keys":
+            self._spawn(self.pane_keys(p))
         elif frame.type == "terminal.open":
             await self.terminal_open(p)
         elif frame.type == "cockpit.brief":
@@ -575,6 +580,20 @@ class Node:
             )
             config = Path.home() / (".claude" if main else f".claude-{name}")
             fresh = not _credentials_alive(config / ".credentials.json")
+            existing = await _tmux_session_like(f"claude-login-{name or 'default'}-")
+            if existing:
+                # clicking "Log in" again returns to the login already open, not a new one
+                done.append(f"reusing {existing}")
+                result = {
+                    "ok": True,
+                    "tmux": {"name": existing, "socket": "default", "target": f"{existing}:0.0"},
+                    "attach": f"tmux attach -t {existing}",
+                    "fresh": fresh,
+                    "notes": done,
+                }
+                self._refresh.set()
+                await self._reply("login.result", p, result)
+                return
             result = await launch(spec, self.s, [])
             if result.get("ok") and result.get("tmux") and not fresh:
                 # an empty slot asks by itself; a slot that is already logged in needs the
@@ -589,6 +608,30 @@ class Node:
             result = {"ok": False, "error": str(e)}
         self._refresh.set()
         await self._reply("login.result", p, result)
+
+    async def pane_screen(self, p: dict[str, Any]) -> None:
+        """What a tmux pane shows, and what a login screen in it asks for."""
+        try:
+            text = await capture(str(p.get("socket") or ""), str(p.get("target") or ""))
+            result = {"ok": True, "login": login_screen.read(text)}
+            if result["login"]["stage"] == "done":
+                self._credentials_changed.set()  # the plan's numbers can be fetched now
+        except (TmuxSendError, OSError, TimeoutError) as e:
+            result = {"ok": False, "error": str(e)[:200]}
+        await self._reply("pane.screen", p, result)
+
+    async def pane_keys(self, p: dict[str, Any]) -> None:
+        try:
+            await send_keys(
+                str(p.get("socket") or ""),
+                str(p.get("target") or ""),
+                [str(k) for k in p.get("keys") or []],
+                str(p.get("text") or ""),
+            )
+            result: dict[str, Any] = {"ok": True}
+        except TmuxSendError as e:
+            result = {"ok": False, "error": str(e)}
+        await self._reply("pane.keys", p, result)
 
     async def session_switch(self, p: dict[str, Any]) -> None:
         try:
@@ -925,7 +968,19 @@ class Node:
                         )
             except Exception:  # noqa: BLE001
                 log.exception("usage collection failed")
-            await asyncio.sleep(self.s.usage_interval + random.uniform(0, 60))
+            # a login that was added or renewed is polled at once, not at the next round
+            waited, limit = 0.0, self.s.usage_interval + random.uniform(0, 60)
+            seen = _credentials_signature()
+            while waited < limit:
+                try:
+                    await asyncio.wait_for(self._credentials_changed.wait(), 30)
+                except TimeoutError:
+                    pass
+                waited += 30
+                if self._credentials_changed.is_set() or _credentials_signature() != seen:
+                    self._credentials_changed.clear()
+                    await asyncio.sleep(3)  # let Claude finish writing its files
+                    break
 
     async def pa_reminder_loop(self) -> None:
         """Todos that became due turn into a push. The texts go to the hub to be pushed on,
@@ -973,6 +1028,27 @@ class Node:
             self.pa_reminder_loop(),
             serve_hooks(self, self.s.node_host, self.s.node_port),
         )
+
+
+def _credentials_signature() -> tuple[tuple[str, float], ...]:
+    """When each Claude login's credentials last changed."""
+    out = []
+    for d in discover_claude_dirs():
+        try:
+            out.append((d.name, (d / ".credentials.json").stat().st_mtime))
+        except OSError:
+            continue
+    return tuple(out)
+
+
+async def _tmux_session_like(prefix: str) -> str:
+    proc = await asyncio.create_subprocess_exec(
+        "tmux", "list-sessions", "-F", "#{session_name}",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+    )  # fmt: skip
+    out, _ = await proc.communicate()
+    names = [n for n in out.decode().split() if n.startswith(prefix)]
+    return names[-1] if names else ""
 
 
 def _pane_as_agent(sess: Session) -> Session:

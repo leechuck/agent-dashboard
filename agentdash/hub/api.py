@@ -529,6 +529,41 @@ async def move_session(key: str, body: MoveBody, request: Request):
     return imported
 
 
+def _pane_of(key: str, sess) -> dict:
+    """tmux coordinates of a session, or of a pane key "<machine>:tmux:<server>:<target>"."""
+    tmux = (sess.extra.get("tmux") if sess else None) or {}
+    parts = key.split(":", 3)
+    if not tmux and len(parts) == 4 and parts[1] == "tmux":
+        tmux = {"socket": parts[2], "target": parts[3]}
+    return tmux
+
+
+@router.get("/panes/{key:path}/screen")
+async def pane_screen(key: str, request: Request):
+    """What a pane asks for right now (a login screen read into stage, link and options)."""
+    st = _state(request)
+    tmux = _pane_of(key, await st.find_session(key))
+    if not tmux:
+        raise HTTPException(404, "not a tmux pane")
+    return await _node_call(request, key.split(":", 1)[0], "pane.screen", tmux, timeout=20)
+
+
+class KeysBody(BaseModel):
+    text: str = ""
+    keys: list[str] = []
+
+
+@router.post("/panes/{key:path}/keys")
+async def pane_keys(key: str, body: KeysBody, request: Request):
+    """Answer a menu or paste a code into a pane, without a terminal."""
+    st = _state(request)
+    tmux = _pane_of(key, await st.find_session(key))
+    if not tmux:
+        raise HTTPException(404, "not a tmux pane")
+    payload = {**tmux, "text": body.text[:4000], "keys": body.keys[:10]}
+    return await _node_call(request, key.split(":", 1)[0], "pane.keys", payload, timeout=20)
+
+
 class TitleBody(BaseModel):
     title: str = ""
 

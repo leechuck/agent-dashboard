@@ -59,7 +59,7 @@
       const r = await api.openLogin(machine, name)
       if (r.ok && r.terminal_key) {
         loginMsg[machine] = ''
-        location.hash = `#/terminal/${encodeURIComponent(r.terminal_key)}`
+        location.hash = `#/terminal/${encodeURIComponent(r.terminal_key)}?control=1`
       } else loginMsg[machine] = r.error ?? 'failed'
     } catch (e) {
       loginMsg[machine] = String(e)
@@ -275,7 +275,7 @@
     <div class="row"><button type="button" onclick={addEndpoint}>Add endpoint</button><span class="small muted">{epMsg}</span><button class="primary" onclick={saveEndpoints}>Save endpoints</button></div>
 
     <h2>Claude logins</h2>
-    <p class="small muted">Every subscription can stay logged in at the same time: each lives in its own directory with its own credentials, and nothing logs the others out. "Log in" opens Claude for that login in a terminal here and types <code>/login</code> for you; follow the prompts, open the address it prints and paste the code back. All slots share instructions, skills and transcripts, so a running session can move from one subscription to the other with "Switch agent / model", and the Limits page shows every plan you are logged into.</p>
+    <p class="small muted">Every subscription can stay logged in at the same time: each lives in its own directory with its own credentials, and nothing logs the others out. "Log in" opens Claude for that login here: pick the login method, open the sign-in page, paste the code it shows into the box. Pressing it again returns to the same login instead of opening another. All slots share instructions, skills and transcripts, so a running session can move from one subscription to the other with "Switch agent / model", and the Limits page shows every plan you are logged into.</p>
     {#each Object.entries(cat?.machines ?? {}) as [m, c] (m)}
       {#if c.ok && c.harnesses?.claude}
         <div class="card">

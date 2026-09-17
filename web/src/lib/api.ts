@@ -56,6 +56,10 @@ export const api = {
     ),
   moveSession: (key: string, body: Partial<AgentChoice> & { machine: string; cwd?: string; note?: string; stop_old?: boolean; force?: boolean; name?: string }) =>
     j<{ ok: boolean; error?: string; attach?: string; terminal_key?: string; session_key?: string; stopped?: boolean; source?: string }>(`/api/sessions/${encodeURIComponent(key)}/move`, { method: 'POST', body: JSON.stringify(body) }),
+  paneScreen: (key: string) =>
+    j<{ ok: boolean; error?: string; login: { stage: string; url?: string; options?: { n: number; label: string; chosen: boolean }[]; continue?: boolean } }>(`/api/panes/${encodeURIComponent(key)}/screen`),
+  paneKeys: (key: string, keys: string[], text = '') =>
+    j<{ ok: boolean; error?: string }>(`/api/panes/${encodeURIComponent(key)}/keys`, { method: 'POST', body: JSON.stringify({ keys, text }) }),
   setTitle: (key: string, title: string) => j<{ ok: boolean; title: string }>(`/api/sessions/${encodeURIComponent(key)}/title`, { method: 'PUT', body: JSON.stringify({ title }) }),
   regenerateTitle: (key: string) => j<{ ok: boolean; title: string }>(`/api/sessions/${encodeURIComponent(key)}/title/regenerate`, { method: 'POST', body: '{}' }),
   regenerateTitles: () => j<{ ok: boolean; renamed: number }>('/api/titles/regenerate', { method: 'POST', body: '{}' }),

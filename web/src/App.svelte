@@ -29,7 +29,10 @@
     if (h.startsWith('decisions')) return { page: 'decisions' }
     if (h.startsWith('history/')) return { page: 'history', key: decodeURIComponent(h.slice(8)) }
     if (h === 'history') return { page: 'history' }
-    if (h.startsWith('terminal/')) return { page: 'terminal', key: decodeURIComponent(h.slice(9)) }
+    if (h.startsWith('terminal/')) {
+      const [path, query] = h.slice(9).split('?')
+      return { page: 'terminal', key: decodeURIComponent(path), q: new URLSearchParams(query ?? '') }
+    }
     if (h.startsWith('session/')) {
       const [path, query] = h.slice(8).split('?')
       const key = decodeURIComponent(path)
@@ -77,7 +80,7 @@
         {:else if route.page === 'limits'}
           <Limits />
         {:else if route.page === 'terminal' && route.key}
-          {#await terminalView() then T}<T.default key={route.key} />{/await}
+          {#await terminalView() then T}<T.default key={route.key} control={route.q?.get('control') === '1'} />{/await}
         {:else if route.page === 'new'}
           <NewSession machine={route.q?.get('machine') ?? ''} resume={route.q?.get('resume') ?? ''} title={route.q?.get('cwd') ?? ''} />
         {:else if route.key}
@@ -97,7 +100,7 @@
     {:else if route.page === 'limits'}
       <Limits />
     {:else if route.page === 'terminal' && route.key}
-      {#await terminalView() then T}<T.default key={route.key} />{/await}
+      {#await terminalView() then T}<T.default key={route.key} control={route.q?.get('control') === '1'} />{/await}
     {:else if route.page === 'new'}
       <NewSession machine={route.q?.get('machine') ?? ''} resume={route.q?.get('resume') ?? ''} title={route.q?.get('cwd') ?? ''} />
     {:else if route.page === 'session' && route.key}

@@ -78,7 +78,7 @@
   {#if result}
     <p class={`small ${result.ok ? 'okmsg' : 'err'}`}>{result.text}
       {#if result.key}<a href={`#/session/${encodeURIComponent(result.key)}`}>Open it</a>{/if}
-      {#if result.terminal}<a href={`#/terminal/${encodeURIComponent(result.terminal)}`}>Terminal</a>{/if}
+      {#if result.terminal}<a href={`#/terminal/${encodeURIComponent(result.terminal)}?control=1`}>Terminal</a>{/if}
     </p>
   {/if}
 </div>
