@@ -229,6 +229,34 @@ export interface PATodoPanel {
   projects: { slug: string; name: string; kind: string }[]
 }
 
+export interface PAEvent {
+  id: string
+  title: string
+  start: string
+  end: string
+  all_day: boolean
+  calendar: string
+  location: string
+  link: string
+  busy: boolean
+  guests: number
+  unanswered: boolean
+  flags: string[]
+}
+
+export interface PAAgendaPanel {
+  ok: boolean
+  error?: string
+  warning?: string
+  generated: string
+  source: string
+  today: string
+  events: PAEvent[]
+  trips: { title: string; start: string; end: string }[]
+  flagged: number
+  calendars: string[]
+}
+
 export interface PAActResult {
   ok: boolean
   error?: string

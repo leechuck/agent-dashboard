@@ -53,6 +53,33 @@ async def test_text_is_one_argument_after_the_separator(repo):
     assert argv[7:9] == ["--project", "my-paper"]
 
 
+async def test_calendar_add_has_no_way_to_carry_guests(repo):
+    fake(repo, "agenda.py")
+    await Panels(repo).act(
+        "calendar_add",
+        {
+            "title": "--attendees=x@example.org",
+            "start": "2026-09-18T15:00:00+09:00",
+            "minutes": 45,
+            "attendees": "boss@example.org",
+            "description": "notes",
+            "location": "Room 1\n--attendees=y@example.org",
+        },
+    )
+    argv = calls(repo)[0]
+    assert argv == [
+        "add",
+        "--json",
+        "--title=--attendees=x@example.org",
+        "--start=2026-09-18T15:00:00+09:00",
+        "--minutes=45",
+        "--calendar=work",
+        "--location=Room 1 --attendees=y@example.org",
+    ]
+    await Panels(repo).act("calendar_remind", {"title": "Vote", "start": "2026-09-18T09:00:00Z"})
+    assert calls(repo)[1][0] == "remind"
+
+
 @pytest.mark.parametrize(
     ("act", "args"),
     [
@@ -65,6 +92,13 @@ async def test_text_is_one_argument_after_the_separator(repo):
         ("todo_add", {"date": "2026-10-01", "text": "x", "list": "--org"}),
         ("todo_add", {"date": "2026-10-01", "text": "x", "project": "../kg"}),
         ("todo_add", {"date": "2026-10-01", "text": "x" * 2001}),
+        ("calendar_add", {"title": "x", "start": "2026-09-18 15:00"}),
+        ("calendar_add", {"title": "x", "start": "2026-09-18T15:00:00"}),
+        ("calendar_add", {"title": "x", "start": "2026-09-18", "all_day": False}),
+        ("calendar_add", {"title": "x", "start": "2026-09-18T15:00:00Z", "minutes": "1e9"}),
+        ("calendar_add", {"title": "x", "start": "2026-09-18T15:00:00Z", "calendar": "../x"}),
+        ("calendar_add", {"title": "x", "start": "2026-09-18T15:00:00Z", "reminder": "1w;id"}),
+        ("calendar_remind", {"title": "", "start": "2026-09-18T15:00:00Z"}),
         ("shell", {"cmd": "id"}),
     ],
 )

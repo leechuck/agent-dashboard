@@ -29,12 +29,16 @@ class PanelError(Exception):
 # name -> (script and arguments, seconds a result stays fresh, timeout)
 PANELS: dict[str, tuple[list[str], int, int]] = {
     "todo": (["todo.py", "list", "--json"], 20, 30),
+    "agenda": (["agenda.py", "show", "--json", "--days", "7"], 300, 75),
 }
 
 _ID = re.compile(r"^[0-9a-f]{8}$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _LIST = re.compile(r"^[A-Za-z][A-Za-z0-9 _-]{0,30}$")
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
+_WHEN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(Z|[+-]\d{2}:\d{2})$")
+_DURATION = re.compile(r"^\d{1,4}[mhd]$")
+_WORD = re.compile(r"^[a-z]{1,20}$")
 
 
 def _need(a: dict[str, Any], key: str, pattern: re.Pattern[str], optional: bool = False) -> str:
@@ -78,6 +82,41 @@ def _todo_simple(verb: str, second: str = "") -> Callable[[dict[str, Any]], list
     return build
 
 
+def _calendar_add(a: dict[str, Any]) -> list[str]:
+    """An event on the owner's own calendar. There is no field for guests or a description,
+    here or in the script: an event with guests sends invitations."""
+    all_day = bool(a.get("all_day"))
+    when = _DATE if all_day else _WHEN
+    cmd = ["agenda.py", "add", "--json", f"--title={_text(a, 'title', 200)}"]
+    cmd.append(f"--start={_need(a, 'start', when)}")
+    if end := _need(a, "end", when, optional=True):
+        cmd.append(f"--end={end}")
+    if all_day:
+        cmd.append("--all-day")
+    elif a.get("minutes") is not None:
+        minutes = int(a["minutes"]) if str(a["minutes"]).isdigit() else 0
+        if not 5 <= minutes <= 1440:
+            raise PanelError("'minutes' is between 5 and 1440")
+        cmd.append(f"--minutes={minutes}")
+    cmd.append(f"--calendar={_need(a, 'calendar', _WORD, optional=True) or 'work'}")
+    if reminder := _need(a, "reminder", _DURATION, optional=True):
+        cmd.append(f"--reminder={reminder}")
+    if location := _text(a, "location", 200, optional=True):
+        cmd.append(f"--location={location}")
+    return cmd
+
+
+def _calendar_remind(a: dict[str, Any]) -> list[str]:
+    return [
+        "agenda.py",
+        "remind",
+        "--json",
+        f"--title={_text(a, 'title', 200)}",
+        f"--start={_need(a, 'start', _WHEN)}",
+        f"--calendar={_need(a, 'calendar', _WORD, optional=True) or 'work'}",
+    ]
+
+
 # act -> (argument builder, timeout, panels whose cached result is now stale)
 ACTS: dict[str, tuple[Callable[[dict[str, Any]], list[str]], int, tuple[str, ...]]] = {
     "todo_add": (_todo_add, 60, ("todo",)),
@@ -87,6 +126,8 @@ ACTS: dict[str, tuple[Callable[[dict[str, Any]], list[str]], int, tuple[str, ...
     "todo_unsnooze": (_todo_simple("unsnooze"), 60, ("todo",)),
     "todo_due": (_todo_simple("due", "date"), 60, ("todo",)),
     "todo_sync": (lambda a: ["todo_sync.py", "sync"], 300, ("todo",)),
+    "calendar_add": (_calendar_add, 90, ("agenda",)),
+    "calendar_remind": (_calendar_remind, 90, ("agenda",)),
 }
 
 

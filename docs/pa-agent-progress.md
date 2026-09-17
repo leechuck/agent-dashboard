@@ -21,9 +21,23 @@ Contract between the node and the PA scripts: `docs/pa-panels.md`.
   Found on the way: `HubState.on_node_event` ("needs you at the terminal" push) is never
   called from `ws_nodes.py`; left alone, it belongs to the other agent.
 
+  Note for anyone bisecting: commit 1605943 went in with one ruff import-order error
+  (checks and commit were chained without a gate); 58e095f fixes it. Green from there on.
+- 2026-09-17: step 3, calendar. PA repo: `scripts/agenda.py` (show with clash / while away
+  / ends after 17:00 flags, duplicates across calendars merged, ICS fallback; `add` and
+  `remind` without any way to pass guests or a description) with tests. Dashboard: panel
+  `agenda`, acts `calendar_add` / `calendar_remind`, `AgendaPanel.svelte` (today and
+  tomorrow open, rest of the week folded, trip banner, Riyadh time in brackets when the
+  browser is in another zone). Checked against the live calendar at 412 and 1500 px.
+  NOT verified end to end: a real event creation from the dashboard. The quick add was
+  only run with gog's `--dry-run` (scratch copy of the script forces it), and the calendar
+  was checked afterwards to confirm nothing was created. The first real add is the test.
+  Caught by the screenshot, not by svelte-check: a helper used before its declaration
+  blanked the whole page. Every UI step from here on is screenshotted with the console
+  log surfaced before it is committed.
+
 ## Next (in this order)
 
-3. Agenda panel and quick add (no attendees, ever).
 4. Channels panel, notification log, "show in Ferdium".
 5. Hand-off composer, thread export, delegation list with live status.
 6. Mail statistics, "waiting on others".
@@ -36,3 +50,6 @@ Contract between the node and the PA scripts: `docs/pa-panels.md`.
   announce only what becomes due today plus one daily count of the overdue rest, and the
   panel shows six overdue items until "all" is pressed. A clean-out session with the PA
   agent (close, re-date or snooze each) would make the list useful again.
+- Calendar clashes: a recurring self-block without guests ("Lunch") against a long
+  seminar is flagged like any clash. Marking such blocks "free" in Google Calendar removes
+  them from clash detection; or say so and they get treated as soft.

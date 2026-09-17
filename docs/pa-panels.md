@@ -20,6 +20,7 @@ Rules for every script:
 | panel | command | cached | timeout |
 |---|---|---|---|
 | `todo` | `todo.py list --json` | 20 s | 30 s |
+| `agenda` | `agenda.py show --json --days 7` | 5 min | 75 s |
 
 ### `todo`
 
@@ -32,6 +33,19 @@ Rules for every script:
   "lists": ["PA", ...], "counts": {"overdue": 2, ...},
   "projects": [ {"slug": "...", "name": "...", "kind": "..."} ] }
 ```
+
+### `agenda`
+
+```
+{ "ok": true, "source": "gog" | "ics", "warning": "...", "today": "YYYY-MM-DD",
+  "events": [ { "id", "title", "start", "end", "all_day", "calendar", "location", "link",
+                "busy", "guests": 3, "unanswered": false, "flags": ["clashes with X"] } ],
+  "trips": [ {"title": "Travel: ...", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD (exclusive)"} ],
+  "flagged": 2, "calendars": ["personal", "work"] }
+```
+
+Times carry their offset; the page groups `events` by day in the reader's own time zone
+(the script's `days` grouping is for the terminal). Trip blocks are not in `events`.
 
 ## Actions (`POST /api/pa/act` with `{"act": "...", "args": {...}}`)
 
@@ -46,7 +60,13 @@ project names by pattern, text by length) before anything is run.
 | `todo_snooze` | `id`, `until` | `todo.py snooze ... -- ID UNTIL` |
 | `todo_unsnooze` | `id` | `todo.py unsnooze ...` |
 | `todo_due` | `id`, `date` | `todo.py due ... -- ID DATE` |
+| `calendar_add` | `title`, `start`, `end?`, `minutes?`, `all_day?`, `calendar?`, `reminder?`, `location?` | `agenda.py add --json --title=... --start=...` |
+| `calendar_remind` | `title`, `start`, `calendar?` | `agenda.py remind ...` (5 minutes, popup at the start) |
 | `todo_sync` | | `todo_sync.py sync` (org, Google Tasks, completions pulled back) |
+
+Calendar actions have no field for guests or a description, in the node or in the script:
+an event with guests sends invitations. Timed starts are RFC3339 with an offset (the page
+adds the browser's), all-day events take dates, the last day inclusive.
 
 ## Reminders
 

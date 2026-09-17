@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AgendaPanel from './AgendaPanel.svelte'
   import PersonalBriefing from './PersonalBriefing.svelte'
   import TodoPanel from './TodoPanel.svelte'
 
@@ -7,6 +8,7 @@
 
 <div class="personal" class:wide>
   <div class="col">
+    <AgendaPanel />
     <TodoPanel />
   </div>
   <div class="col">
