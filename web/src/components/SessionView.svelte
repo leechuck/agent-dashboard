@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Fleet, fleet } from '../lib/store.svelte'
   import { api } from '../lib/api'
-  import { shortCwd, statusLabel } from '../lib/format'
+  import { backendLabel, contextOf, modelLabel, shortCwd, statusLabel } from '../lib/format'
   import MessageItem from './MessageItem.svelte'
   import Composer from './Composer.svelte'
   import SessionActions from './SessionActions.svelte'
@@ -9,6 +9,9 @@
   let { key }: { key: string } = $props()
   const session = $derived(fleet.sessions[key])
   const messages = $derived(fleet.messages[key] ?? [])
+  const x = $derived((session?.extra ?? {}) as Record<string, any>)
+  const ctx = $derived(session ? contextOf(session) : null)
+  const parent = $derived(x.parent ? fleet.sessions[x.parent] : undefined)
   let showThinking = $state(false)
   let showMeta = $state(false)
   let list: HTMLElement | undefined = $state()
@@ -59,10 +62,17 @@
     <a class="back" href="#/">← Fleet</a>
     <div class="title">
       <span class="name">{session.name || session.session_id.slice(0, 8)}</span>
-      <span class="muted small">{session.harness} on {session.machine}{session.kind === 'background' ? ' · background' : ''}</span>
+      <span class="muted small">{backendLabel(session)} on {session.machine}{session.kind === 'background' ? ' · background' : ''}</span>
     </div>
     <div class={`state small ${session.status}`}>{statusLabel(session.status, session.waiting_for)}</div>
     <div class="cwd muted small">{shortCwd(session.cwd)}</div>
+    <div class="facts muted small">
+      {#if modelLabel(session)}<span>{modelLabel(session)}{x.fast_mode ? ' · fast' : ''}</span>{/if}
+      {#if x.effort}<span>thinking {x.effort}</span>{/if}
+      {#if ctx}<span class:hotctx={ctx.pct >= 85}>context {ctx.pct.toFixed(0)}%{ctx.window ? ` of ${ctx.window}` : ''}{typeof x.context_tokens === 'number' && x.context_tokens ? ` (${Math.round(x.context_tokens / 1000)}k tokens)` : ''}</span>{/if}
+      {#if typeof x.cost_usd === 'number'}<span title="API-price equivalent of this session">≈ ${x.cost_usd.toFixed(2)}</span>{/if}
+      {#if parent}<a href={`#/session/${encodeURIComponent(parent.key)}`}>sub-agent of {parent.name || parent.session_id.slice(0, 8)}</a>{/if}
+    </div>
     <SessionActions {session} />
     <div class="tools small">
       <label><input type="checkbox" bind:checked={showThinking} /> thinking</label>
@@ -89,6 +99,8 @@
 {/if}
 
 <style>
+  .facts { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 2px; }
+  .hotctx { color: var(--signal); }
   .head {
     position: sticky;
     top: var(--sticky-top, 48px);

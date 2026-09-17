@@ -12,10 +12,12 @@ What it does:
   sessions, agents sharing a directory, and stale sessions. On top of that a
   model writes a short briefing: what each agent is doing and what to do next
   (answer, compact, hand off to a fresh session, fan out, switch harness),
-  with prompts you can drop into a session's composer. It only recommends;
-  nothing is sent without you (ADR 0004).
+  with prompts you can send with one tap, edit first, or copy. The model is the
+  local `claude -p` on Sonnet using the subscription login of one node; no API
+  key is needed. Nothing is sent until you press Send (ADR 0004).
 - **Fleet**: live roster per machine, status (busy, idle, waiting for you),
-  last line, one-tap access to the transcript.
+  model, login, thinking depth, context fill, last line. Sub-agents (Claude or
+  Codex sessions started by another session) fold under their parent.
 - **Decisions**: permission prompts from Claude (and Codex, pi) answered from
   the phone while a machine is *armed*; otherwise the terminal dialog appears
   as usual (ADR 0002).
@@ -23,7 +25,9 @@ What it does:
   inbox socket, pi extension), stop/remove/respawn/fork background sessions,
   start new `claude --bg` sessions on any machine.
 - **Terminal**: attach read-only (or take control) to any tmux pane.
-- **Limits**: Claude session/week windows, Codex windows, OpenRouter credits
+- **Limits**: Claude session/week windows per login (several subscriptions
+  side by side: `agentdash install account team`, then `claude-team` and
+  `/login`; the cockpit says which login should take new work), Codex windows, OpenRouter credits
   and key cap, with reset countdowns and push at 80/95 %.
 - **History**: search every past session (agentsview) and resume it.
 

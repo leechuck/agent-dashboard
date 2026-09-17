@@ -37,7 +37,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ action }),
     }),
-  startSession: (machine: string, spec: { cwd: string; prompt?: string; name?: string; resume?: string; permission_mode?: string }) =>
+  startSession: (machine: string, spec: { cwd: string; prompt?: string; name?: string; resume?: string; permission_mode?: string; config_dir?: string }) =>
     j<{ ok: boolean; error?: string; job_id?: string; output?: string }>(`/api/machines/${encodeURIComponent(machine)}/sessions`, {
       method: 'POST',
       body: JSON.stringify(spec),
@@ -51,8 +51,8 @@ export const api = {
   cockpit: (brief = true) => j<Cockpit>(`/api/cockpit?brief=${brief}`),
   cockpitBrief: () => j<Pick<Cockpit, 'briefing' | 'outdated' | 'generating' | 'error'>>('/api/cockpit/brief', { method: 'POST', body: '{}' }),
   usage: () => j<UsageWindow[]>('/api/usage'),
-  usageHistory: (provider: string, window: string, hours = 48) =>
-    j<{ t: number; pct: number }[]>(`/api/usage/history?${new URLSearchParams({ provider, window, hours: String(hours) })}`),
+  usageHistory: (provider: string, window: string, account: string, hours = 48) =>
+    j<{ t: number; pct: number }[]>(`/api/usage/history?${new URLSearchParams({ provider, window, account, hours: String(hours) })}`),
   pushKey: () => j<{ key: string; enabled: boolean }>('/api/push/key'),
   pushSubscribe: (subscription: unknown, label: string) =>
     j<{ ok: boolean }>('/api/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription, label }) }),

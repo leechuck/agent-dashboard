@@ -123,6 +123,8 @@ def scan_status(lines: Iterator[str]) -> dict[str, Any]:
         "last_user": "",
         "context_tokens": 0,
         "context_window": 0,
+        "effort": "",
+        "model": "",
         "last_ts": None,
     }
     for line in lines:
@@ -149,8 +151,10 @@ def scan_status(lines: Iterator[str]) -> dict[str, Any]:
                 last = p["info"].get("last_token_usage") or {}
                 info["context_tokens"] = int(last.get("total_tokens") or 0)
                 info["context_window"] = int(p["info"].get("model_context_window") or 0)
-        elif t == "turn_context" and p.get("cwd"):
-            info["cwd"] = p["cwd"]
+        elif t == "turn_context":
+            info["cwd"] = p.get("cwd") or info["cwd"]
+            info["effort"] = str(p.get("effort") or info["effort"])
+            info["model"] = str(p.get("model") or info["model"])
         ts = _ts(rec)
         if ts:
             info["last_ts"] = ts

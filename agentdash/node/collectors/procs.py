@@ -29,6 +29,37 @@ def start_ms(pid: int) -> int | None:
         return None
 
 
+def ppid(pid: int) -> int:
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        return int(stat.rsplit(")", 1)[1].split()[1])
+    except (OSError, ValueError, IndexError):
+        return 0
+
+
+def env_of(pid: int, name: str) -> str:
+    """One variable from a process' initial environment (what its parent gave it)."""
+    try:
+        raw = Path(f"/proc/{pid}/environ").read_bytes()
+    except OSError:
+        return ""
+    prefix = name.encode() + b"="
+    for item in raw.split(b"\0"):
+        if item.startswith(prefix):
+            return item[len(prefix) :].decode(errors="replace")
+    return ""
+
+
+def ancestors(pid: int, depth: int = 12) -> list[int]:
+    out: list[int] = []
+    for _ in range(depth):
+        pid = ppid(pid)
+        if pid <= 1:
+            break
+        out.append(pid)
+    return out
+
+
 def children(pid: int) -> list[int]:
     try:
         raw = Path(f"/proc/{pid}/task/{pid}/children").read_text().split()

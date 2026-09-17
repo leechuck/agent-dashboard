@@ -11,6 +11,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 STATE_DIR = Path.home() / ".agentdash"
 
 
+def discover_claude_dirs(home: Path | None = None) -> list[Path]:
+    home = home or Path.home()
+    extra = sorted(d for d in home.glob(".claude-*") if d.is_dir())
+    return [home / ".claude", *extra]
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="AGENTDASH_",
@@ -39,22 +45,26 @@ class Settings(BaseSettings):
     keep_usage_days: int = 30
     keep_events_days: int = 90
     cockpit_min_interval: float = 600.0  # seconds between automatic model briefings
+    cockpit_node: str = ""  # machine that should run the briefing; others are fallbacks
 
     # node
     hub_url: str = "ws://127.0.0.1:8790/nodes"
     node_host: str = "127.0.0.1"
     node_port: int = 8791  # local HTTP for hooks
-    claude_config_dirs: list[Path] = Field(
-        default_factory=lambda: [Path.home() / ".claude", Path.home() / ".claude-openrouter"]
-    )
+    # ~/.claude plus every ~/.claude-<name> directory (other logins, gateway wrappers)
+    claude_config_dirs: list[Path] = Field(default_factory=lambda: discover_claude_dirs())
     roster_interval: float = 10.0
     tail_lines: int = 200
     decision_timeout: float = 1770.0  # seconds; keep below the hook timeout (1800)
     arm_hours: float = 12.0
     usage_interval: float = 600.0  # seconds between usage polls (plus jitter)
-    # cockpit briefing: any OpenAI-compatible endpoint; the key stays on this node
+    # cockpit briefing, run on this node. "claude": headless local Claude Code on its
+    # subscription login. "openai": any OpenAI-compatible endpoint with an API key.
+    cockpit_provider: str = "claude"
+    cockpit_model: str = "sonnet"
+    cockpit_claude_dir: Path | None = None  # which login to bill; default: first config dir
     cockpit_base_url: str = "https://openrouter.ai/api/v1"
-    cockpit_model: str = "anthropic/claude-sonnet-5"
+    cockpit_openai_model: str = "anthropic/claude-sonnet-5"
     cockpit_api_key: str = ""  # empty = use OPENROUTER_API_KEY
 
     @property

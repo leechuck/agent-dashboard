@@ -34,3 +34,32 @@ export function clock(ms: number | null | undefined): string {
   if (!ms) return ''
   return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
+
+import type { Session } from './types'
+
+/** "Fable 5.1", "gpt-6-astra": the name people use, without vendor prefixes or date stamps. */
+export function modelLabel(s: Session): string {
+  const x = s.extra as Record<string, any> | undefined
+  if (x?.model_name) return String(x.model_name)
+  const id = (s.model || '').replace(/^.*\//, '').replace(/^claude-/, '').replace(/-\d{8}$/, '')
+  const m = /^(fable|mythos|opus|sonnet|haiku)-(\d+)(?:-(\d+))?$/.exec(id)
+  return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ''}` : id
+}
+
+/** Harness plus where the tokens are billed: "claude · max · personal", "claude via openrouter". */
+export function backendLabel(s: Session): string {
+  const x = s.extra as Record<string, any> | undefined
+  if (s.harness === 'tmux') return `${s.provider} (tmux)`
+  const std = ['anthropic', 'openai', '']
+  let out: string = s.harness
+  if (x?.account) out += ` · ${x.account}`
+  else if (s.provider && !std.includes(s.provider)) out += ` via ${s.provider}`
+  return out
+}
+
+export function contextOf(s: Session): { pct: number; window: string } | null {
+  const x = s.extra as Record<string, any> | undefined
+  if (typeof x?.context_pct !== 'number') return null
+  const w = Number(x.context_window) || 0
+  return { pct: x.context_pct, window: w >= 1_000_000 ? `${w / 1_000_000}M` : w ? `${Math.round(w / 1000)}k` : '' }
+}

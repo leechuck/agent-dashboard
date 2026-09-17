@@ -19,18 +19,22 @@
   }
 
   const subs = $derived.by(() => {
-    const out: { provider: string; account: string; machine: string; session?: UsageWindow; week: UsageWindow[]; money: UsageWindow[] }[] = []
+    const out: { provider: string; account: string; several: boolean; command: string; machine: string; session?: UsageWindow; week: UsageWindow[]; money: UsageWindow[] }[] = []
     for (const p of ['anthropic', 'openai']) {
-      const ws = windows.filter((w) => w.provider === p)
-      if (!ws.length) continue
-      out.push({
-        provider: p,
-        account: ws[0].account,
-        machine: ws[0].machine,
-        session: ws.find((w) => kindOf(w) === 'session'),
-        week: ws.filter((w) => kindOf(w) === 'week'),
-        money: ws.filter((w) => kindOf(w) === 'money'),
-      })
+      const accounts = [...new Set(windows.filter((w) => w.provider === p).map((w) => w.account))].sort()
+      for (const a of accounts) {
+        const ws = windows.filter((w) => w.provider === p && w.account === a)
+        out.push({
+          provider: p,
+          account: a,
+          several: accounts.length > 1,
+          command: String(ws[0].detail?.config_dir ?? '').startsWith('.claude') ? 'claude' + String(ws[0].detail.config_dir).slice(7) : '',
+          machine: ws[0].machine,
+          session: ws.find((w) => kindOf(w) === 'session'),
+          week: ws.filter((w) => kindOf(w) === 'week'),
+          money: ws.filter((w) => kindOf(w) === 'money'),
+        })
+      }
     }
     return out
   })
@@ -65,12 +69,14 @@
     const span = Math.max(1, pts[pts.length - 1].t - t0)
     return pts.map((p, i) => `${i ? 'L' : 'M'}${((p.t - t0) / span) * 100},${100 - p.pct}`).join(' ')
   }
-  const key = (w: UsageWindow) => `${w.provider}:${w.window}`
+  const key = (w: UsageWindow) => `${w.provider}:${w.account}:${w.window}`
+  /** The cockpit's pick of which login should take new work, when a provider has several. */
+  const useNext = $derived(fleet.cockpit?.findings.filter((f) => f.kind === 'account') ?? [])
 
   async function loadHistory() {
     for (const w of windows) {
       try {
-        history[key(w)] = await api.usageHistory(w.provider, w.window)
+        history[key(w)] = await api.usageHistory(w.provider, w.window, w.account)
       } catch {
         /* ignore */
       }
@@ -110,11 +116,15 @@
     <p class="notice muted">No usage data yet. Nodes report every ten minutes.</p>
   {/if}
 
-  {#each subs as s (s.provider)}
+  {#each useNext as f (f.id)}
+    <div class="next"><b>{f.title}.</b> <span class="muted">{f.detail}</span></div>
+  {/each}
+
+  {#each subs as s (s.provider + s.account)}
     <div class="prov">
       <div class="phead">
         <span class="pname">{names[s.provider] ?? s.provider}</span>
-        <span class="muted small">{plans[s.account] ?? s.account}{s.account ? ' · ' : ''}via {s.machine}</span>
+        <span class="muted small">{plans[s.account] ?? s.account}{s.account ? ' · ' : ''}{s.several && s.command ? `start with ${s.command} · ` : ''}via {s.machine}</span>
       </div>
       <div class="pair">
         {@render gauge(s.session, 'Session · rolling 5 hours')}
@@ -169,6 +179,7 @@
 </section>
 
 <style>
+  .next { margin: 0 16px 12px; padding: 10px 12px; border-left: 3px solid var(--cobalt); background: var(--cobalt-soft); border-radius: var(--radius); font-size: 14px; }
   h1 { font-size: 22px; margin: 16px 16px 8px; }
   .notice { padding: 0 16px; }
   .prov { background: var(--surface); border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline); margin-bottom: 14px; padding: 12px 16px 12px; }

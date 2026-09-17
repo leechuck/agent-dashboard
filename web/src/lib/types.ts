@@ -89,11 +89,12 @@ export interface UsageWindow {
 }
 
 export interface CockpitAction {
-  type: 'open_session' | 'open_decisions' | 'open_limits' | 'new_session' | 'cleanup'
+  type: 'open_session' | 'open_decisions' | 'open_limits' | 'new_session' | 'cleanup' | 'send_prompt'
   label: string
   href: string
   machine: string
   keys: string[]
+  prompt: string
 }
 
 export interface Finding {
@@ -127,9 +128,9 @@ export interface Briefing {
 
 export interface Cockpit {
   headline: string
-  stats: { busy: number; waiting: number; idle: number; stale: number; machines_online: number; machines: number }
+  stats: { busy: number; waiting: number; idle: number; stale: number; subagents: number; machines_online: number; machines: number }
   findings: Finding[]
-  headroom: Record<string, number>
+  headroom: { provider: string; account: string; label: string; used_pct: number; window: string; command: string }[]
   briefing: Briefing | null
   outdated: boolean
   generating: boolean

@@ -46,6 +46,11 @@ def main(argv: list[str]) -> int:
                     {
                         "context_window_size": cw.get("context_window_size"),
                         "used_percentage": cw.get("used_percentage"),
+                        "effort": (data.get("effort") or {}).get("level"),
+                        "thinking": (data.get("thinking") or {}).get("enabled"),
+                        "fast_mode": data.get("fast_mode"),
+                        "model_name": (data.get("model") or {}).get("display_name"),
+                        "cost_usd": (data.get("cost") or {}).get("total_cost_usd"),
                         "_written": int(time.time() * 1000),
                     }
                 )

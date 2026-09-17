@@ -1,7 +1,7 @@
 <script lang="ts">
   import { fleet } from '../lib/store.svelte'
   import { ago, clock } from '../lib/format'
-  let { id, count }: { id: string; count: number } = $props()
+  let { id, count, subagents = 0 }: { id: string; count: number; subagents?: number } = $props()
   const m = $derived(fleet.machines[id])
   const armed = $derived(!!m && m.armed && (m.armed_until === 0 || m.armed_until > Date.now()))
   let busy = $state(false)
@@ -20,7 +20,7 @@
   {#if m && !m.online}
     <span class="state off">node offline{m.last_seen ? `, last seen ${ago(m.last_seen)} ago` : ''}</span>
   {:else}
-    <span class="state">{count} session{count === 1 ? '' : 's'}</span>
+    <span class="state">{count} session{count === 1 ? '' : 's'}{subagents ? ` · ${subagents} sub` : ''}</span>
   {/if}
   <a class="newbtn" href={`#/new?machine=${encodeURIComponent(id)}`} title="Start a background session here">+ new</a>
   <button class="arm" class:on={armed} disabled={busy || !m?.online} onclick={toggle}
@@ -45,8 +45,9 @@
     background: var(--page);
     border-bottom: 1px solid var(--hairline);
   }
-  .name { font-weight: 600; font-size: 17px; }
-  .state { color: var(--muted); font-size: 13px; }
+  .name { font-weight: 600; font-size: 17px; white-space: nowrap; }
+  .state { color: var(--muted); font-size: 13px; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .newbtn, .arm { white-space: nowrap; flex: none; }
   .state.off { color: var(--signal); }
   .newbtn { margin-left: auto; font-size: 13px; }
   .arm { font-size: 13px; padding: 4px 10px; color: var(--muted); }

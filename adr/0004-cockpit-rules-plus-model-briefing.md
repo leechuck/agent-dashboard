@@ -22,12 +22,19 @@ Two layers, both in `agentdash/hub/cockpit.py`:
 2. **Briefing** (`Briefer`): a model gets a compact, secret-free digest plus
    the rule findings and returns JSON (summary, one line per session,
    up to six suggestions with optional prompt text). The call runs on a node
-   (`cockpit.brief` frame, `agentdash/node/briefing.py`) because API keys live
-   on nodes and never on the hub. Any OpenAI-compatible endpoint works; the
-   default is OpenRouter.
+   (`cockpit.brief` frame, `agentdash/node/briefing.py`) because logins and API
+   keys live on nodes and never on the hub. Default provider: one headless turn
+   of the local Claude Code (`claude -p --model sonnet`, no tools, no user
+   settings so no hooks fire, no MCP, no saved session, own working directory
+   that the roster ignores) on the node's subscription login; the hub prefers
+   the node named in `AGENTDASH_COCKPIT_NODE`. Alternative provider `openai`:
+   any OpenAI-compatible endpoint with a key.
 
-The cockpit never acts. Suggested prompts become a draft in the session's
-composer (or a copy button where the dashboard cannot send). Briefings are
+The cockpit never acts by itself. A suggestion can be carried out from the page
+with one press (Send, Stop, Compact now, Allow/Deny), edited first, or copied.
+Slash commands cannot go through Claude's inbox socket (they arrive as a peer
+message, verified 2026-09-17); they are typed into the tmux pane instead, which
+also gives Codex sessions in tmux a prompt channel. Briefings are
 generated when the Cockpit page is opened and the fleet has changed, at most
 once per `cockpit_min_interval`, or on the Refresh button; the hub does not
 spend tokens while nobody looks.
@@ -38,6 +45,7 @@ spend tokens while nobody looks.
 - The digest (session names, directories, last request, last output line,
   limit percentages) leaves the tailnet for the model provider. No transcripts,
   tokens or file contents are included.
-- One briefing costs about 2 US cents with the default model.
+- One briefing is one Sonnet turn on the subscription (about 20 s); with the
+  `openai` provider about 2 US cents.
 - Money (OpenRouter credit) is reported to the model in dollars, never as a
   percentage, because "82 % used" of a large balance is not a warning.

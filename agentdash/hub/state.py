@@ -168,8 +168,10 @@ class HubState:
 
     async def usage_snapshot(self, windows: list[UsageWindow]) -> None:
         for w in windows:
+            if w.provider == "anthropic" and " · " in w.account:
+                await self.db.adopt_legacy_usage(w.provider, w.account, w.account.split(" · ")[0])
             await self.db.add_usage(w)
-            key = f"{w.provider}:{w.window}"
+            key = f"{w.provider}:{w.account}:{w.window}"
             level = 95 if w.used_pct >= 95 else 80 if w.used_pct >= 80 else 0
             if level and self._usage_alerted.get(key, 0) < level:
                 self._usage_alerted[key] = level
@@ -178,7 +180,8 @@ class HubState:
                     mins = max(0, (w.resets_at - now_ms()) // 60000)
                     when = f", resets in {mins // 60} h {mins % 60} min"
                 await self.notify(
-                    f"{w.provider} {w.label} at {w.used_pct:.0f}%",
+                    f"{w.provider}{f' ({w.account})' if w.account else ''} {w.label} "
+                    f"at {w.used_pct:.0f}%",
                     f"{level}% threshold crossed{when}",
                     "/#/limits",
                     tag=f"usage-{key}",

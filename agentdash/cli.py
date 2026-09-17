@@ -142,5 +142,23 @@ def install_statusline_cmd(
         typer.echo(f"statusline sidecar installed into {d / 'settings.json'}")
 
 
+@install_app.command("account")
+def install_account_cmd(
+    name: str = typer.Argument(..., help='short name of the login, e.g. "team"'),
+) -> None:
+    """Add a second Claude login (~/.claude-NAME and a claude-NAME command) that the node tracks."""
+    from .install.account import install_account
+
+    try:
+        for line in install_account(name):
+            typer.echo(line)
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from e
+    typer.echo(
+        f"\nNow run `claude-{name}` and log in with /login using that account.\n"
+        "Then restart the node: systemctl --user restart agentdash-node"
+    )
+
+
 if __name__ == "__main__":
     app()

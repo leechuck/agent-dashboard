@@ -36,11 +36,12 @@ PROVIDER_NAME = {"anthropic": "Claude", "openai": "Codex", "openrouter": "OpenRo
 
 @dataclass
 class Action:
-    type: str  # open_session | open_decisions | open_limits | new_session | cleanup
+    type: str  # open_session | open_decisions | open_limits | new_session | cleanup | send_prompt
     label: str
     href: str = ""
     machine: str = ""
     keys: list[str] = field(default_factory=list)
+    prompt: str = ""  # for send_prompt: typed into keys[0]
 
 
 @dataclass
@@ -104,14 +105,75 @@ def _is_money(w: UsageWindow) -> bool:
     return w.provider == "openrouter"
 
 
-def provider_headroom(usage: list[UsageWindow]) -> dict[str, float]:
-    """Worst subscription window per provider, as percent used."""
-    worst: dict[str, float] = {}
+def _accounts(usage: list[UsageWindow], provider: str) -> list[str]:
+    return sorted({w.account for w in usage if w.provider == provider and not _is_money(w)})
+
+
+def _who(w: UsageWindow, usage: list[UsageWindow]) -> str:
+    """ "Claude", or "Claude (team · KAUST)" when the provider has more than one login."""
+    name = PROVIDER_NAME.get(w.provider, w.provider)
+    return f"{name} ({w.account})" if w.account and len(_accounts(usage, w.provider)) > 1 else name
+
+
+def _command(w: UsageWindow) -> str:
+    d = str(w.detail.get("config_dir") or "")
+    return "claude" + d.removeprefix(".claude") if d.startswith(".claude") else ""
+
+
+def provider_headroom(usage: list[UsageWindow]) -> list[dict[str, Any]]:
+    """Worst subscription window per login, as percent used."""
+    worst: dict[tuple[str, str], UsageWindow] = {}
     for w in usage:
-        if _is_money(w):
+        if _is_money(w) or w.window == "extra_usage":
             continue
-        worst[w.provider] = max(worst.get(w.provider, 0.0), w.used_pct)
-    return worst
+        k = (w.provider, w.account)
+        if k not in worst or w.used_pct > worst[k].used_pct:
+            worst[k] = w
+    return [
+        {
+            "provider": w.provider,
+            "account": w.account,
+            "label": _who(w, usage),
+            "used_pct": w.used_pct,
+            "window": w.label or w.window,
+            "command": _command(w),
+        }
+        for w in worst.values()
+    ]
+
+
+def pick_account(usage: list[UsageWindow], provider: str, now: int) -> dict[str, Any] | None:
+    """Which login of one provider should take new work, so no quota expires unused.
+
+    Weekly quota that resets soon is lost first, so rank by unused weekly percent per
+    hour left; a login whose short window is nearly full cannot take work right now.
+    """
+    rows = []
+    for acct in _accounts(usage, provider):
+        wins = [w for w in usage if w.provider == provider and w.account == acct]
+        week = next((w for w in wins if w.window.startswith(("seven_day", "secondary"))), None)
+        short = next((w for w in wins if w.window.startswith(("five_hour", "primary"))), None)
+        if week is None:
+            week, short = short, None
+        if week is None:
+            continue
+        hours = max(1.0, ((week.resets_at or now + 168 * HOUR) - now) / HOUR)
+        rows.append(
+            {
+                "account": acct,
+                "week_pct": week.used_pct,
+                "week_resets_in": _span(hours * HOUR),
+                "short_pct": short.used_pct if short else None,
+                "blocked": bool(short and short.used_pct >= 90) or week.used_pct >= 98,
+                "score": (100 - week.used_pct) / hours,
+                "command": _command(week),
+            }
+        )
+    if len(rows) < 2:
+        return None
+    open_ = [r for r in rows if not r["blocked"]] or rows
+    best = max(open_, key=lambda r: r["score"])
+    return {"best": best, "rows": rows}
 
 
 def analyse(
@@ -194,20 +256,26 @@ def analyse(
     for w in usage:
         if _is_money(w):
             continue
-        rate = burn_rate(history.get(f"{w.provider}:{w.window}", []), now)
+        rate = burn_rate(history.get(f"{w.provider}:{w.account}:{w.window}", []), now)
         to_reset = (w.resets_at - now) if w.resets_at else None
         eta = ((100 - w.used_pct) / rate * HOUR) if rate > 0 else None
         runs_out = eta is not None and to_reset is not None and eta < to_reset and w.used_pct >= 50
         if w.used_pct < 80 and not runs_out:
             continue
-        pname = PROVIDER_NAME.get(w.provider, w.provider)
+        pname = _who(w, usage)
         users = [
             s
             for s in live
-            if HARNESS_PROVIDER.get(s.harness) == w.provider and s.provider in ("", w.provider)
+            if HARNESS_PROVIDER.get(s.harness) == w.provider
+            and s.provider in ("", w.provider)
+            and s.extra.get("account", w.account) == w.account
         ]
         busy = [s for s in users if s.status == "busy"]
-        alts = sorted((p, v) for p, v in headroom.items() if p != w.provider and v < 70)
+        alts = sorted(
+            (h for h in headroom if (h["provider"], h["account"]) != (w.provider, w.account)),
+            key=lambda h: (h["provider"] != w.provider, h["used_pct"]),
+        )
+        alts = [h for h in alts if h["used_pct"] < 70]
         bits = [f"{w.used_pct:.0f}% used"]
         if to_reset is not None:
             bits.append(f"resets in {_span(to_reset)}")
@@ -223,9 +291,10 @@ def analyse(
                 + "."
             )
         if alts:
-            p, v = min(alts, key=lambda x: x[1])
+            h = alts[0]
+            how = f" with `{h['command']}`" if h["command"] and h["provider"] == w.provider else ""
             advice.append(
-                f"Start new work on {PROVIDER_NAME.get(p, p)} ({v:.0f}% used) or through OpenRouter."
+                f"Start new work on {h['label']} ({h['used_pct']:.0f}% used){how} or through OpenRouter."
             )
         elif to_reset is not None:
             advice.append(
@@ -233,7 +302,7 @@ def analyse(
             )
         out.append(
             Finding(
-                id=f"usage:{w.provider}:{w.window}",
+                id=f"usage:{w.provider}:{w.account}:{w.window}",
                 severity="act" if w.used_pct >= 95 or (runs_out and eta < HOUR) else "warn",
                 kind="limit",
                 title=f"{pname} {w.label or w.window} limit: "
@@ -288,6 +357,9 @@ def analyse(
             )
         else:
             detail = f"Context {pct:.0f}% full{size}. Plan a /compact at the next natural break, or start the next sub-task in a new session."
+        can_type = (
+            bool(s.extra.get("tmux")) and s.harness in ("claude", "codex") and s.status == "idle"
+        )
         out.append(
             Finding(
                 id=f"context:{s.key}",
@@ -297,7 +369,15 @@ def analyse(
                 detail=detail,
                 session_key=s.key,
                 machine=s.machine,
-                action=Action("open_session", "Open", _session_href(s.key)),
+                action=Action(
+                    "send_prompt",
+                    "Compact now",
+                    _session_href(s.key),
+                    keys=[s.key],
+                    prompt="/compact",
+                )
+                if can_type
+                else Action("open_session", "Open", _session_href(s.key)),
             )
         )
 
@@ -320,7 +400,7 @@ def analyse(
     # 8. several agents in one working directory
     by_dir: dict[tuple[str, str], list[Session]] = {}
     for s in live:
-        if s.cwd and s.harness != "tmux" and s.status == "busy":
+        if s.cwd and s.harness != "tmux" and s.status == "busy" and not s.extra.get("parent"):
             by_dir.setdefault((s.machine, s.cwd), []).append(s)
     for (machine, cwd), group in by_dir.items():
         if len(group) > 1:
@@ -340,7 +420,10 @@ def analyse(
     ready = [
         s
         for s in live
-        if s.status == "idle" and s.harness not in ("tmux",) and now - s.updated_at < 12 * HOUR
+        if s.status == "idle"
+        and s.harness not in ("tmux",)
+        and not s.extra.get("parent")
+        and now - s.updated_at < 12 * HOUR
     ]
     if ready:
         ready.sort(key=lambda s: -s.updated_at)
@@ -380,24 +463,59 @@ def analyse(
             )
 
     # 11. spare capacity
-    if (
-        live
-        and not any(s.status == "busy" for s in live)
-        and headroom
-        and min(headroom.values()) < 50
-    ):
-        p, v = min(headroom.items(), key=lambda x: x[1])
-        target = next((m.id for m in machines if m.online), "")
+    if live and not any(s.status == "busy" for s in live) and headroom:
+        h = min(headroom, key=lambda x: x["used_pct"])
+        if h["used_pct"] < 50:
+            target = next((m.id for m in machines if m.online), "")
+            out.append(
+                Finding(
+                    id="capacity",
+                    severity="info",
+                    kind="capacity",
+                    title="Nothing is running and there is room on the limits",
+                    detail=f"{h['label']} is at {h['used_pct']:.0f}%. A good moment to queue background work.",
+                    action=Action("new_session", "Start a session", _new_href(target))
+                    if target
+                    else None,
+                )
+            )
+
+    # 12. several logins of one provider: which one should take new work
+    for provider in sorted({w.provider for w in usage if not _is_money(w)}):
+        pick = pick_account(usage, provider, now)
+        if not pick:
+            continue
+        best, pname = pick["best"], PROVIDER_NAME.get(provider, provider)
+        on_other = [
+            s
+            for s in live
+            if HARNESS_PROVIDER.get(s.harness) == provider
+            and s.extra.get("account") not in (None, best["account"])
+            and not s.extra.get("parent")
+        ]
+        rows = "; ".join(
+            f"{r['account']}: week {r['week_pct']:.0f}%, resets in {r['week_resets_in']}"
+            + (f", session {r['short_pct']:.0f}%" if r["short_pct"] is not None else "")
+            + (" (full for now)" if r["blocked"] else "")
+            for r in pick["rows"]
+        )
+        gap = max(r["week_pct"] for r in pick["rows"]) - min(r["week_pct"] for r in pick["rows"])
         out.append(
             Finding(
-                id="capacity",
-                severity="info",
-                kind="capacity",
-                title="Nothing is running and there is room on the limits",
-                detail=f"{PROVIDER_NAME.get(p, p)} is at {v:.0f}%. A good moment to queue background work.",
-                action=Action("new_session", "Start a session", _new_href(target))
-                if target
-                else None,
+                id=f"account:{provider}",
+                severity="warn" if gap >= 40 and on_other else "info",
+                kind="account",
+                title=f"Use {best['account']} for new {pname} work"
+                + (f" (`{best['command']}`)" if best["command"] else ""),
+                detail=f"It has the most weekly quota that would otherwise expire unused. {rows}."
+                + (
+                    f" {len(on_other)} session(s) run on the other login: "
+                    + ", ".join(_name(s) for s in on_other[:4])
+                    + "."
+                    if on_other
+                    else ""
+                ),
+                action=Action("open_limits", "Limits", "#/limits"),
             )
         )
 
@@ -412,6 +530,7 @@ def stats(
     live = [s for s in sessions if s.status in ACTIVE and not is_stale(s, now)]
     return {
         "busy": sum(s.status == "busy" for s in live),
+        "subagents": sum(1 for s in live if s.extra.get("parent")),
         "waiting": sum(s.status == "waiting" for s in live),
         "idle": sum(s.status == "idle" for s in live),
         "stale": sum(1 for s in sessions if s.status in ACTIVE and is_stale(s, now)),
@@ -460,6 +579,13 @@ def digest(
                 "minutes_since_activity": int((now - s.updated_at) / 60000),
                 "hours_running": round((now - s.started_at) / HOUR, 1) if s.started_at else None,
                 "context_pct": s.extra.get("context_pct"),
+                "effort": s.extra.get("effort"),
+                "account": s.extra.get("account"),
+                "subagent_of": s.extra.get("parent"),
+                "can_receive_prompt": (s.harness == "claude" and bool(s.extra.get("socket")))
+                or (s.harness == "pi" and bool(s.extra.get("inbox")))
+                or bool(s.extra.get("tmux")),
+                "can_receive_slash_commands": bool(s.extra.get("tmux")),
                 "last_user_request": s.extra.get("last_user", ""),
                 "last_output": s.last_line,
             }
@@ -468,6 +594,7 @@ def digest(
         "limits": [
             {
                 "provider": w.provider,
+                "account": w.account,
                 "window": w.label or w.window,
                 "used_pct": round(w.used_pct, 1),
                 "resets_in_minutes": int((w.resets_at - now) / 60000) if w.resets_at else None,
@@ -506,6 +633,13 @@ duplicate each other or have gone idle for long; work that could start now becau
 - "limits" are subscription windows that reset; "prepaid_credit" is money and only matters when the \
 remaining dollars are low compared with what the fleet burns. Never call credit "x% used".
 - A busy session without last_output is normal, not a problem.
+- Sessions with "subagent_of" were started by another session and are managed by it: never suggest \
+answering or prompting them; mention them only if they are stuck or wasteful.
+- When a provider has several accounts, say which account new work should use so that no weekly \
+quota expires unused, and name sessions worth moving.
+- Only put a "prompt" on sessions with can_receive_prompt true, or the owner cannot send it. A prompt \
+that is a slash command (/compact, /clear) only works where can_receive_slash_commands is true; elsewhere \
+say in "why" that the owner has to type it in the terminal, and leave "prompt" empty.
 - A suggested prompt must be something the owner could send to that session verbatim.
 
 Reply with JSON only, matching:
@@ -530,7 +664,9 @@ def fingerprint(d: dict[str, Any]) -> str:
             )
             for s in d["sessions"]
         ),
-        "l": sorted((w["provider"], w["window"], int(w["used_pct"] // 5)) for w in d["limits"]),
+        "l": sorted(
+            (w["provider"], w["account"], w["window"], int(w["used_pct"] // 5)) for w in d["limits"]
+        ),
         "f": sorted(f["title"] for f in d["rule_findings"] if f["severity"] == "act"),
     }
     return hashlib.sha256(json.dumps(core, sort_keys=True).encode()).hexdigest()[:16]
@@ -583,6 +719,7 @@ class Briefer:
 
     def __init__(self, min_interval: float = 600.0) -> None:
         self.min_interval = min_interval
+        self.preferred = ""  # machine id from settings
         self.briefing: dict[str, Any] | None = None
         self.error = ""
         self.generating = False
@@ -613,10 +750,10 @@ class Briefer:
             self.generating = True
             state.bus.publish("cockpit.updated", {"generating": True})
             try:
-                order = sorted(state.nodes, key=lambda m: m != self._node)
+                order = sorted(state.nodes, key=lambda m: (m != self.preferred, m != self._node, m))
                 if not order:
                     raise RuntimeError("no node online to run the briefing")
-                last = "no node has a model key (set OPENROUTER_API_KEY in ~/.agentdash/.env on one machine)"
+                last = "no online node can run the model (needs a logged-in claude, or an API key)"
                 for machine in order:
                     res = await state.request(
                         state.nodes[machine],

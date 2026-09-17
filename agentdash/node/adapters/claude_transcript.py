@@ -196,7 +196,13 @@ def tail_facts(path: Path, max_bytes: int = 200_000) -> dict[str, Any]:
     real user prompt), context_tokens (prompt size of the last main-thread model call,
     which is what fills the context window) and model.
     """
-    facts: dict[str, Any] = {"last_line": "", "last_user": "", "context_tokens": 0, "model": ""}
+    facts: dict[str, Any] = {
+        "last_line": "",
+        "last_user": "",
+        "context_tokens": 0,
+        "model": "",
+        "effort": "",
+    }
     try:
         size = path.stat().st_size
         with path.open("rb") as f:
@@ -209,6 +215,8 @@ def tail_facts(path: Path, max_bytes: int = 200_000) -> dict[str, Any]:
     for m in iter_messages(iter(lines)):
         if m.kind != "text" or m.is_meta or m.agent_id:
             continue
+        if m.text.lstrip().startswith(("<local-command", "<command-", "<task-notification")):
+            continue  # slash-command plumbing, not something anyone said
         if m.role in ("assistant", "user"):
             facts["last_line"] = m.text
             if m.role == "user":
@@ -231,6 +239,7 @@ def tail_facts(path: Path, max_bytes: int = 200_000) -> dict[str, Any]:
             for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
         )
         facts["model"] = str(msg.get("model") or "")
+        facts["effort"] = str(rec.get("effort") or "")
         break
     facts["last_line"] = " ".join(facts["last_line"].split())[:160]
     facts["last_user"] = " ".join(facts["last_user"].split())[:300]

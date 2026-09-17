@@ -24,6 +24,7 @@ from typing import Any
 import httpx
 
 from ...models import UsageWindow, now_ms
+from .claude import account_of
 
 log = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ class UsageCollector:
                 self._claude_version = "2.1.0"
         return self._claude_version
 
-    def _claude_from_statusline(self, config_dir: Path) -> list[UsageWindow]:
+    def _claude_from_statusline(self, config_dir: Path, account: str) -> list[UsageWindow]:
         suffix = "" if config_dir.name == ".claude" else "-" + config_dir.name
         f = self.state_dir / f"claude-rate-limits{suffix}.json"
         try:
@@ -79,7 +80,7 @@ class UsageCollector:
                 out.append(
                     UsageWindow(
                         provider="anthropic",
-                        account=data.get("account", ""),
+                        account=account,
                         window=key,
                         label=label,
                         used_pct=float(w["used_percentage"]),
@@ -89,7 +90,7 @@ class UsageCollector:
                 )
         return out
 
-    async def _claude_from_api(self, config_dir: Path) -> list[UsageWindow]:
+    async def _claude_from_api(self, config_dir: Path, account: str) -> list[UsageWindow]:
         cred_file = config_dir / ".credentials.json"
         try:
             cred = json.loads(cred_file.read_text())
@@ -99,7 +100,8 @@ class UsageCollector:
         token = oauth.get("accessToken")
         if not token:
             return []
-        if time.time() < self._backoff_until.get("anthropic", 0):
+        backoff = f"anthropic:{account}"
+        if time.time() < self._backoff_until.get(backoff, 0):
             return []
         headers = {
             "Authorization": f"Bearer {token}",
@@ -114,14 +116,13 @@ class UsageCollector:
             log.warning("claude usage: %s", e)
             return []
         if r.status_code == 429:
-            self._backoff_until["anthropic"] = time.time() + 30 * 60
+            self._backoff_until[backoff] = time.time() + 30 * 60
             log.warning("claude usage: rate limited, backing off 30 min")
             return []
         if r.status_code != 200:
             log.warning("claude usage: HTTP %s", r.status_code)
             return []
         data = r.json()
-        account = oauth.get("subscriptionType", "")
         out = []
         labels = {
             "five_hour": "5 hours",
@@ -160,13 +161,19 @@ class UsageCollector:
         return out
 
     async def claude(self) -> list[UsageWindow]:
+        """One set of windows per subscription login; two config dirs on one login count once."""
         out: list[UsageWindow] = []
+        seen: set[str] = set()
         for d in self.claude_dirs:
-            if d.name != ".claude":
-                continue  # API-key config dirs (openrouter) have no subscription windows
-            wins = self._claude_from_statusline(d)
+            acct = account_of(d)
+            if acct["provider"] != "anthropic" or not acct["account"] or acct["account"] in seen:
+                continue  # API-key or gateway dirs have no subscription windows
+            seen.add(acct["account"])
+            wins = self._claude_from_statusline(d, acct["account"])
             if not wins:
-                wins = await self._claude_from_api(d)
+                wins = await self._claude_from_api(d, acct["account"])
+            for w in wins:
+                w.detail = {**w.detail, "config_dir": d.name, "plan": acct["plan"]}
             out += wins
         return out
 

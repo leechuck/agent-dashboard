@@ -32,11 +32,43 @@ _STATE_MAP = {
 }
 
 
+def account_of(config_dir: Path) -> dict[str, str]:
+    """Which login a config dir uses: {provider, plan, account}. Never returns a secret.
+
+    A dir with Claude OAuth credentials is an Anthropic subscription, whatever its name;
+    `account` tells two subscriptions apart ("max · personal", "team · KAUST").
+    Dirs without credentials (API key or gateway wrappers) are named after their suffix.
+    """
+    plan = ""
+    try:
+        cred = json.loads((config_dir / ".credentials.json").read_text())
+        plan = str((cred.get("claudeAiOauth") or {}).get("subscriptionType") or "")
+        has_oauth = bool((cred.get("claudeAiOauth") or {}).get("accessToken"))
+    except (OSError, json.JSONDecodeError):
+        has_oauth = False
+    if not has_oauth:
+        name = config_dir.name.removeprefix(".claude-") if config_dir.name != ".claude" else ""
+        return {"provider": name or "anthropic", "plan": "", "account": ""}
+    profile = config_dir.parent / ".claude.json" if config_dir.name == ".claude" else None
+    org = ""
+    for f in (config_dir / ".claude.json", profile):
+        try:
+            acct = json.loads(f.read_text()).get("oauthAccount") if f else None
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(acct, dict) and acct.get("organizationName"):
+            org = str(acct["organizationName"])
+            break
+    who = "personal" if not org or org.endswith("'s Organization") else org
+    return {
+        "provider": "anthropic",
+        "plan": plan,
+        "account": " · ".join(x for x in (plan, who) if x),
+    }
+
+
 def provider_for_config_dir(config_dir: Path) -> str:
-    name = config_dir.name
-    if name == ".claude":
-        return "anthropic"
-    return name.removeprefix(".claude-") or "anthropic"
+    return account_of(config_dir)["provider"]
 
 
 def find_transcript(config_dir: Path, session_id: str, cwd: str) -> Path | None:
@@ -59,11 +91,18 @@ def _describe(extra: dict[str, Any], facts: dict[str, Any], sid: str, state_dir:
     """
     if facts.get("last_user"):
         extra["last_user"] = facts["last_user"]
+    if facts.get("effort"):
+        extra["effort"] = facts["effort"]
     tokens = int(facts.get("context_tokens") or 0)
     window, pct = 0, None
     try:
         side = json.loads((state_dir / "claude-context" / f"{sid}.json").read_text())
         window = int(side.get("context_window_size") or 0)
+        for k in ("effort", "model_name", "cost_usd", "fast_mode"):
+            if side.get(k) not in (None, ""):
+                extra[k] = side[k]
+        if side.get("thinking") is False:
+            extra["effort"] = "off"
         if side.get("used_percentage") is not None and not tokens:
             pct = float(side["used_percentage"])
     except (OSError, ValueError, json.JSONDecodeError):
@@ -125,7 +164,9 @@ class ClaudeCollector:
     async def collect(self) -> list[Session]:
         sessions: list[Session] = []
         for config_dir in self.config_dirs:
-            provider = provider_for_config_dir(config_dir)
+            acct = account_of(config_dir)
+            provider = acct["provider"]
+            internal = str(self.state_dir / "cockpit")  # the cockpit's own headless calls
             agents, registry = await self._agents_json(config_dir), self._registry(config_dir)
             seen_ids: set[str] = set()
             for a in agents:
@@ -142,10 +183,14 @@ class ClaudeCollector:
                 if a.get("waitingFor"):
                     status = SessionStatus.waiting
                 cwd = a.get("cwd", "")
+                if cwd == internal:
+                    continue
                 tpath = self._transcripts.get(sid) or find_transcript(config_dir, sid, cwd)
                 if tpath:
                     self._transcripts[sid] = tpath
                 extra: dict[str, Any] = {"config_dir": str(config_dir)}
+                if acct["account"]:
+                    extra["account"] = acct["account"]
                 if a.get("id"):
                     extra["job_id"] = a["id"]
                 if reg:
@@ -180,12 +225,16 @@ class ClaudeCollector:
                 if not sid or sid in seen_ids or not _pid_alive(pid):
                     continue
                 cwd = reg.get("cwd", "")
+                if cwd == internal:
+                    continue
                 tpath = find_transcript(config_dir, sid, cwd)
                 facts = tail_facts(tpath) if tpath else {}
                 extra = {
                     "config_dir": str(config_dir),
                     "socket": reg.get("messagingSocketPath", ""),
                 }
+                if acct["account"]:
+                    extra["account"] = acct["account"]
                 _describe(extra, facts, sid, self.state_dir)
                 sessions.append(
                     Session(

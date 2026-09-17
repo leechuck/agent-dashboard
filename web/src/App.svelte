@@ -26,7 +26,13 @@
     if (h.startsWith('history/')) return { page: 'history', key: decodeURIComponent(h.slice(8)) }
     if (h === 'history') return { page: 'history' }
     if (h.startsWith('terminal/')) return { page: 'terminal', key: decodeURIComponent(h.slice(9)) }
-    if (h.startsWith('session/')) return { page: 'session', key: decodeURIComponent(h.slice(8)) }
+    if (h.startsWith('session/')) {
+      const [path, query] = h.slice(8).split('?')
+      const key = decodeURIComponent(path)
+      const draft = new URLSearchParams(query ?? '').get('draft')
+      if (draft) fleet.drafts[key] = draft
+      return { page: 'session', key }
+    }
     return { page: 'fleet' }
   }
 

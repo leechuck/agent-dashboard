@@ -40,6 +40,7 @@ from .adapters.claude_cli import job_action, kill_process, start_background
 from .adapters.claude_socket import SocketSendError, send_user_message
 from .adapters.claude_transcript import TranscriptTail, read_last
 from .adapters.claude_transcript import iter_messages as claude_iter
+from .adapters.tmux_keys import TmuxSendError, type_prompt
 from .collectors.claude import ClaudeCollector
 from .collectors.codex import CodexCollector
 from .collectors.hermes import HermesCollector
@@ -50,6 +51,7 @@ from .collectors.usage import UsageCollector
 from .decisions import DecisionManager
 from .hookserver import serve_hooks
 from .hubclient import HubClient
+from .lineage import link_parents
 from .terminal import TerminalSession
 
 log = logging.getLogger(__name__)
@@ -60,6 +62,7 @@ NOT_ANSWERABLE = {"AskUserQuestion"}
 class Node:
     def __init__(self, settings: Settings) -> None:
         self._tasks: set[asyncio.Task[Any]] = set()
+        self.parents: dict[str, str] = {}  # session key -> key of the session that spawned it
         self.s = settings
         self.machine = settings.machine_id
         self.claude = ClaudeCollector(self.machine, settings.claude_config_dirs, settings.state_dir)
@@ -280,11 +283,31 @@ class Node:
             {"session_key": key, "messages": [m.model_dump() for m in initial], "reset": True},
         )
 
+    @staticmethod
+    def _has_inbox(sess: Session | None) -> bool:
+        if sess is None:
+            return False
+        return bool(
+            (sess.harness == "claude" and sess.extra.get("socket"))
+            or (sess.harness == "pi" and sess.extra.get("inbox"))
+        )
+
     async def send_prompt(self, key: str, text: str, request_id: str) -> None:
         sess = self.sessions.get(key)
         result: dict[str, Any] = {"session_key": key, "request_id": request_id, "ok": False}
+        pane = (sess.extra.get("tmux") or {}) if sess else {}
+        # a slash command only works when typed; the inbox socket delivers it as plain text
+        typed = bool(pane) and (text.startswith("/") or not self._has_inbox(sess))
         if not sess:
             result["error"] = "unknown session"
+        elif typed:
+            try:
+                await type_prompt(pane.get("socket", ""), pane.get("target", ""), text)
+                result.update(ok=True, via="tmux")
+            except TmuxSendError as e:
+                result["error"] = str(e)
+        elif text.startswith("/") and sess.harness == "claude":
+            result["error"] = "commands like /compact must be typed; this session is not in tmux"
         elif sess.harness == "claude" and sess.extra.get("socket"):
             try:
                 reply = await send_user_message(
@@ -424,7 +447,12 @@ class Node:
         rid = p.get("request_id", "")
         config_dir = None
         for d in self.s.claude_config_dirs:
-            if p.get("provider", "anthropic") == (d.name.removeprefix(".claude-") or "anthropic"):
+            if p.get("config_dir"):
+                if d.name == p["config_dir"]:  # a named login; only known dirs are accepted
+                    config_dir = str(d)
+            elif p.get("provider", "anthropic") == (
+                d.name.removeprefix(".claude-") if d.name != ".claude" else "anthropic"
+            ):
                 config_dir = str(d)
         result = await start_background(
             p.get("cwd", ""),
@@ -466,6 +494,7 @@ class Node:
                 except Exception:  # noqa: BLE001
                     log.exception("tmux collector failed")
                 self._apply_hints(sessions)
+                await asyncio.to_thread(link_parents, sessions, self.parents)
                 self.sessions = {s.key: s for s in sessions}
                 await self.hub.send(NODE_SESSIONS, {"sessions": [s.model_dump() for s in sessions]})
             except Exception:  # noqa: BLE001

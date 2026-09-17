@@ -46,8 +46,8 @@ export class Fleet {
       this.decisions[d.id] = d
     } else if (e.kind === 'usage.updated') {
       const incoming = e.data as UsageWindow[]
-      const keep = this.usage.filter((u) => !incoming.some((n) => n.provider === u.provider && n.window === u.window))
-      this.usage = [...keep, ...incoming].sort((a, b) => a.provider.localeCompare(b.provider) || a.window.localeCompare(b.window))
+      const keep = this.usage.filter((u) => !incoming.some((n) => n.provider === u.provider && n.account === u.account && n.window === u.window))
+      this.usage = [...keep, ...incoming].sort((a, b) => a.provider.localeCompare(b.provider) || a.account.localeCompare(b.account) || a.window.localeCompare(b.window))
     } else if (e.kind === 'cockpit.updated') {
       void this.loadCockpit(false)
     } else if (e.kind === 'session.messages') {
@@ -93,7 +93,13 @@ export class Fleet {
   static canSend(s: Session | undefined): boolean {
     if (!s || s.status === 'offline') return false
     const x = s.extra as Record<string, unknown> | undefined
-    return (s.harness === 'claude' && !!x?.socket) || (s.harness === 'pi' && !!x?.inbox)
+    return (s.harness === 'claude' && !!x?.socket) || (s.harness === 'pi' && !!x?.inbox) || !!x?.tmux
+  }
+
+  /** Slash commands only work typed into the terminal, so the session must sit in tmux. */
+  static canDeliver(s: Session | undefined, text: string): boolean {
+    if (!Fleet.canSend(s)) return false
+    return !text.trim().startsWith('/') || !!(s!.extra as Record<string, unknown> | undefined)?.tmux
   }
 
   /** Not busy and untouched for two days: hidden by default, removable in bulk. */

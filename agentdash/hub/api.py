@@ -167,6 +167,7 @@ class StartBody(BaseModel):
     resume: str = ""
     permission_mode: str = ""
     provider: str = "anthropic"
+    config_dir: str = ""  # which Claude login, by directory name (".claude-team")
 
 
 @router.post("/machines/{machine_id}/sessions")
@@ -223,7 +224,9 @@ async def _cockpit_inputs(st: HubState):
     usage = await st.db.latest_usage()
     since = _now() - 3 * 3600 * 1000
     history = {
-        f"{w.provider}:{w.window}": await st.db.usage_history(w.provider, w.window, since)
+        f"{w.provider}:{w.account}:{w.window}": await st.db.usage_history(
+            w.provider, w.window, since, w.account
+        )
         for w in usage
         if w.provider != "openrouter"
     }
@@ -243,6 +246,7 @@ async def cockpit(request: Request, brief: bool = True):
     stats = ck.stats(sessions, machines)
     d = ck.digest(sessions, machines, usage, findings)
     st.briefer.min_interval = request.app.state.settings.cockpit_min_interval
+    st.briefer.preferred = request.app.state.settings.cockpit_node
     if brief and st.nodes:
         task = asyncio.create_task(st.briefer.refresh(st, d))
         request.app.state.bg_tasks = getattr(request.app.state, "bg_tasks", set())
@@ -263,6 +267,7 @@ async def cockpit_brief(request: Request):
     st = _state(request)
     sessions, machines, usage, findings = await _cockpit_inputs(st)
     d = ck.digest(sessions, machines, usage, findings)
+    st.briefer.preferred = request.app.state.settings.cockpit_node
     await st.briefer.refresh(st, d, force=True)
     return st.briefer.view(ck.fingerprint(d))
 
@@ -273,8 +278,12 @@ async def usage(request: Request):
 
 
 @router.get("/usage/history")
-async def usage_history(request: Request, provider: str, window: str, hours: int = 48):
-    pts = await _state(request).db.usage_history(provider, window, _now() - hours * 3600 * 1000)
+async def usage_history(
+    request: Request, provider: str, window: str, hours: int = 48, account: str | None = None
+):
+    pts = await _state(request).db.usage_history(
+        provider, window, _now() - hours * 3600 * 1000, account
+    )
     return [{"t": t, "pct": p} for t, p in pts]
 
 

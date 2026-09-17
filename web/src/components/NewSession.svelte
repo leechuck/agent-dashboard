@@ -9,6 +9,20 @@
   let prompt = $state('')
   let name = $state('')
   let mode = $state('default')
+  let login = $state('')
+  /** Claude logins seen in the limits (one per config directory); offered when there are several. */
+  const logins = $derived.by(() => {
+    const seen = new Map<string, string>()
+    for (const w of fleet.usage) {
+      const dir = String(w.detail?.config_dir ?? '')
+      if (w.provider === 'anthropic' && dir && !seen.has(dir)) seen.set(dir, w.account)
+    }
+    return [...seen.entries()].map(([dir, account]) => ({ dir, account }))
+  })
+  const suggested = $derived(fleet.cockpit?.headroom.filter((h) => h.provider === 'anthropic').sort((a, b) => a.used_pct - b.used_pct)[0]?.account ?? '')
+  $effect(() => {
+    if (!login && logins.length > 1) login = (logins.find((l) => l.account === suggested) ?? logins[0]).dir
+  })
   let dirs = $state<string[]>([])
   let busy = $state(false)
   let msg = $state('')
@@ -39,7 +53,7 @@
     busy = true
     msg = ''
     try {
-      const r = await api.startSession(machine, { cwd, prompt, name, resume, permission_mode: mode })
+      const r = await api.startSession(machine, { cwd, prompt, name, resume, permission_mode: mode, config_dir: logins.length > 1 ? login : '' })
       ok = r.ok
       msg = r.ok ? `Started${r.job_id ? ` as ${r.job_id}` : ''}. It appears in the fleet in a few seconds.` : r.error || r.output || 'failed'
       if (r.ok) prompt = ''
@@ -66,6 +80,15 @@
   <label>{resume ? 'Message (optional)' : 'Task'}
     <textarea rows="4" bind:value={prompt} required={!resume} placeholder={resume ? 'Continue with…' : 'What should it do?'}></textarea>
   </label>
+  {#if logins.length > 1}
+    <label>Claude login
+      <select bind:value={login}>
+        {#each logins as l (l.dir)}
+          <option value={l.dir}>{l.account}{l.account === suggested ? ' (most room)' : ''}</option>
+        {/each}
+      </select>
+    </label>
+  {/if}
   <div class="row">
     <label>Name <input bind:value={name} placeholder="optional" /></label>
     <label>Permissions

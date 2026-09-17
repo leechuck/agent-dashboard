@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from pathlib import Path
@@ -27,6 +28,17 @@ def _tail_lines(path: Path, max_bytes: int = 300_000) -> list[str]:
     return [line.decode("utf-8", "replace") for line in lines if line.strip()]
 
 
+def _spawned_by(source: object) -> str:
+    """Parent thread id when the threads.source column describes a sub-agent spawn."""
+    if not isinstance(source, str) or not source.startswith("{"):
+        return ""
+    try:
+        spawn = json.loads(source).get("subagent", {}).get("thread_spawn", {})
+    except (json.JSONDecodeError, AttributeError):
+        return ""
+    return str(spawn.get("parent_thread_id") or "") if isinstance(spawn, dict) else ""
+
+
 class CodexCollector:
     def __init__(self, machine: str, codex_home: Path | None = None) -> None:
         self.machine = machine
@@ -35,7 +47,7 @@ class CodexCollector:
 
     _COLS = (
         "id, rollout_path, cwd, title, name, updated_at_ms, created_at_ms, model, "
-        "first_user_message"
+        "first_user_message, reasoning_effort, source, agent_nickname, agent_role"
     )
 
     def _query(self, where: str, args: tuple) -> list[dict]:
@@ -63,7 +75,8 @@ class CodexCollector:
         return rows[0] if rows else None
 
     def _latest_for_cwd(self, cwd: str, started_ms: int | None) -> dict | None:
-        rows = self._query("cwd = ?", (cwd,))
+        # a process is a main thread; sub-agent threads share its cwd and are often newer
+        rows = [r for r in self._query("cwd = ?", (cwd,)) if not _spawned_by(r.get("source"))]
         for r in rows:
             if started_ms is None or int(r.get("created_at_ms") or 0) >= started_ms - 60_000:
                 return r
@@ -104,10 +117,22 @@ class CodexCollector:
             path = Path(t["rollout_path"]) if t.get("rollout_path") else None
             info = scan_status(iter(_tail_lines(path))) if path and path.exists() else {}
             status = SessionStatus.busy if info.get("busy") else SessionStatus.idle
+            spawn = _spawned_by(t.get("source"))
             if pid is None:
-                status = SessionStatus.done
+                # Codex runs its sub-agents inside the parent process: no pid of their own
+                fresh = now - int(info.get("last_ts") or t.get("updated_at_ms") or 0) < 10 * 60000
+                status = (
+                    SessionStatus.busy
+                    if spawn and info.get("busy") and fresh
+                    else SessionStatus.done
+                )
             name = (
-                t.get("name")
+                (
+                    f"{t['agent_nickname']} ({t.get('agent_role') or 'sub-agent'})"
+                    if spawn and t.get("agent_nickname")
+                    else ""
+                )
+                or t.get("name")
                 or t.get("title")
                 or (t.get("first_user_message") or "")[:60]
                 or Path(t.get("cwd") or info.get("cwd", "") or "codex").name
@@ -115,6 +140,11 @@ class CodexCollector:
             extra: dict = {"codex_home": str(self.home)}
             if info.get("last_user"):
                 extra["last_user"] = info["last_user"]
+            effort = info.get("effort") or t.get("reasoning_effort")
+            if effort:
+                extra["effort"] = str(effort)
+            if spawn:
+                extra["parent"] = Session.make_key(self.machine, Harness.codex, spawn)
             if info.get("context_tokens") and info.get("context_window"):
                 extra["context_tokens"] = info["context_tokens"]
                 extra["context_window"] = info["context_window"]
@@ -137,7 +167,7 @@ class CodexCollector:
                 or now,
                 transcript_path=str(path) if path else "",
                 last_line=" ".join(str(info.get("last_agent_message", "")).split())[:160],
-                model=str(t.get("model") or ""),
+                model=str(info.get("model") or t.get("model") or ""),
                 extra=extra,
             )
 

@@ -29,7 +29,7 @@ def test_statusline_file_is_used_when_fresh(tmp_path: Path):
         )
     )
     c = UsageCollector("m", [cfg], state)
-    wins = c._claude_from_statusline(cfg)
+    wins = c._claude_from_statusline(cfg, "max · personal")
     assert [(w.window, w.used_pct, w.resets_at) for w in wins] == [
         ("five_hour", 23.5, 1789570200000),
         ("seven_day", 41.2, 1789740000000),
@@ -45,4 +45,4 @@ def test_statusline_file_ignored_when_stale(tmp_path: Path):
     (state / "claude-rate-limits.json").write_text(
         json.dumps({"rate_limits": {"five_hour": {"used_percentage": 1}}, "_written": 0})
     )
-    assert UsageCollector("m", [cfg], state)._claude_from_statusline(cfg) == []
+    assert UsageCollector("m", [cfg], state)._claude_from_statusline(cfg, "max · personal") == []

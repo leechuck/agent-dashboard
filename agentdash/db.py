@@ -74,13 +74,25 @@ class Database:
 
     async def _migrate(self) -> None:
         """Add columns introduced after the first release (SQLite has no ADD IF NOT EXISTS)."""
-        wanted = {"machines": {"armed_until": "INTEGER DEFAULT 0"}}
+        wanted = {
+            "machines": {"armed_until": "INTEGER DEFAULT 0"},
+            "usage_snapshots": {"account": "TEXT DEFAULT ''"},
+        }
         for table, cols in wanted.items():
             cur = await self.db.execute(f"PRAGMA table_info({table})")
             have = {r["name"] for r in await cur.fetchall()}
             for col, decl in cols.items():
                 if col not in have:
                     await self.db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+                    if (table, col) == ("usage_snapshots", "account"):
+                        await self.db.execute(
+                            "UPDATE usage_snapshots "
+                            "SET account = COALESCE(json_extract(data, '$.account'), '')"
+                        )
+        await self.db.execute(
+            "CREATE INDEX IF NOT EXISTS usage_paw "
+            "ON usage_snapshots(provider, account, window, fetched_at)"
+        )
         await self.db.commit()
 
     async def close(self) -> None:
@@ -207,10 +219,11 @@ class Database:
     # usage ------------------------------------------------------------
     async def add_usage(self, w: UsageWindow) -> None:
         await self.db.execute(
-            """INSERT INTO usage_snapshots(provider,machine,window,used_pct,resets_at,
-                 fetched_at,data) VALUES(?,?,?,?,?,?,?)""",
+            """INSERT INTO usage_snapshots(provider,account,machine,window,used_pct,resets_at,
+                 fetched_at,data) VALUES(?,?,?,?,?,?,?,?)""",
             (
                 w.provider,
+                w.account,
                 w.machine,
                 w.window,
                 w.used_pct,
@@ -221,25 +234,44 @@ class Database:
         )
         await self.db.commit()
 
-    async def latest_usage(self) -> list[UsageWindow]:
-        """Newest snapshot per (provider, window), whichever machine reported it."""
+    async def latest_usage(self, max_age_ms: int = 48 * 3600 * 1000) -> list[UsageWindow]:
+        """Newest snapshot per (provider, account, window), whichever machine reported it.
+
+        Accounts nobody has reported for two days (a login that went away) drop out.
+        """
         cur = await self.db.execute(
             """SELECT data FROM usage_snapshots u
-               WHERE fetched_at = (SELECT MAX(fetched_at) FROM usage_snapshots
-                                   WHERE provider=u.provider AND window=u.window)
-               ORDER BY provider, window"""
+               WHERE fetched_at >= ?
+                 AND fetched_at = (SELECT MAX(fetched_at) FROM usage_snapshots
+                                   WHERE provider=u.provider AND account=u.account
+                                     AND window=u.window)
+               GROUP BY provider, account, window
+               ORDER BY provider, account, window""",
+            (now_ms() - max_age_ms,),
         )
         return [UsageWindow.model_validate_json(r["data"]) for r in await cur.fetchall()]
 
     async def usage_history(
-        self, provider: str, window: str, since_ms: int
+        self, provider: str, window: str, since_ms: int, account: str | None = None
     ) -> list[tuple[int, float]]:
+        sql = "SELECT fetched_at, used_pct FROM usage_snapshots WHERE provider=? AND window=?"
+        args: list[Any] = [provider, window]
+        if account is not None:
+            sql += " AND account=?"
+            args.append(account)
         cur = await self.db.execute(
-            """SELECT fetched_at, used_pct FROM usage_snapshots
-               WHERE provider=? AND window=? AND fetched_at>=? ORDER BY fetched_at""",
-            (provider, window, since_ms),
+            sql + " AND fetched_at>=? ORDER BY fetched_at", [*args, since_ms]
         )
         return [(r["fetched_at"], r["used_pct"]) for r in await cur.fetchall()]
+
+    async def adopt_legacy_usage(self, provider: str, account: str, plan: str) -> None:
+        """Rows written before accounts had names ("" or just the plan) join this account."""
+        await self.db.execute(
+            """UPDATE usage_snapshots SET account=?, data=json_set(data, '$.account', ?)
+               WHERE provider=? AND account IN ('', ?) AND account != ?""",
+            (account, account, provider, plan, account),
+        )
+        await self.db.commit()
 
     async def prune_events(self, keep_ms: int) -> None:
         await self.db.execute("DELETE FROM events WHERE ts < ?", (now_ms() - keep_ms,))
