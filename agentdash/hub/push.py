@@ -54,13 +54,15 @@ class Pusher:
         return bool(self.private_pem)
 
     def _send_one(self, sub: dict[str, Any], payload: dict[str, Any]) -> bool:
+        from py_vapid import Vapid
         from pywebpush import WebPushException, webpush
 
         try:
+            # pywebpush reads a string as base64 DER, not PEM: hand it the parsed key
             webpush(
                 subscription_info=sub,
                 data=json.dumps(payload),
-                vapid_private_key=self.private_pem,
+                vapid_private_key=Vapid.from_pem(self.private_pem.encode()),
                 vapid_claims={"sub": self.subject},
                 ttl=600,
             )
@@ -69,6 +71,11 @@ class Pusher:
             status = getattr(getattr(e, "response", None), "status_code", None)
             log.warning("push failed (%s): %s", status, e)
             return status not in (404, 410)  # gone -> drop subscription
+        except Exception as e:  # noqa: BLE001
+            # a push must never take down whatever triggered it (it once closed the
+            # node's websocket on every notification)
+            log.warning("push failed: %s: %s", e.__class__.__name__, str(e)[:200])
+            return True
 
     async def send(self, subs: list[dict[str, Any]], payload: dict[str, Any]) -> list[str]:
         """Send to all; return endpoints that should be removed."""

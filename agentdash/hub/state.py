@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
@@ -29,6 +30,8 @@ from ..models import (
 from .bus import EventBus
 from .cockpit import Briefer, Titler
 from .push import Pusher
+
+log = logging.getLogger(__name__)
 
 SLIM_CHARS = 400
 
@@ -154,10 +157,13 @@ class HubState:
     async def notify(self, title: str, body: str, url: str = "", tag: str = "") -> None:
         if not self.pusher or not self.pusher.enabled:
             return
-        subs = await self.db.list_push_subscriptions()
-        gone = await self.pusher.send(subs, {"title": title, "body": body, "url": url, "tag": tag})
-        for ep in gone:
-            await self.db.remove_push_subscription(ep)
+        try:
+            subs = await self.db.list_push_subscriptions()
+            payload = {"title": title, "body": body, "url": url, "tag": tag}
+            for ep in await self.pusher.send(subs, payload):
+                await self.db.remove_push_subscription(ep)
+        except Exception:  # noqa: BLE001
+            log.exception("notification failed")
 
     async def set_armed(self, machine_id: str, armed: bool, hours: float) -> dict[str, Any]:
         until = int(now_ms() + hours * 3600 * 1000) if armed and hours > 0 else 0
