@@ -24,6 +24,7 @@ from ..config import Settings
 from ..models import Session, now_ms
 from . import pa_reminders
 from .adapters.claude_cli import start_background
+from .launcher import Endpoint, LaunchError, LaunchSpec, launch
 from .pa_panels import PanelError, Panels
 
 log = logging.getLogger(__name__)
@@ -198,7 +199,11 @@ class PersonalAssistant:
 
     # ---- running the agent -------------------------------------------
     async def run(
-        self, sessions: dict[str, Session], focus: str = "", agent: dict[str, Any] | None = None
+        self,
+        sessions: dict[str, Session],
+        focus: str = "",
+        agent: dict[str, Any] | None = None,
+        endpoints: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         if not self.available:
             return {"ok": False, "error": "no pa"}
@@ -209,6 +214,26 @@ class PersonalAssistant:
         if focus.strip():
             prompt += f"\n\nRobert's note for this run: {focus.strip()[:1000]}\n"
         agent = agent or {}
+        if agent.get("backend") == "endpoint":
+            # Claude Code in ~/pa, but talking to one of the owner's model servers
+            spec = LaunchSpec(
+                cwd=str(self.dir),
+                prompt=prompt,
+                name=SESSION_NAME,
+                backend="endpoint",
+                endpoint=str(agent.get("endpoint") or ""),
+                model=str(agent.get("model") or ""),
+                mode="background",
+            )
+            try:
+                eps = [Endpoint.parse(e) for e in endpoints or []]
+                r = await launch(spec, self.s, eps)
+            except LaunchError as e:
+                return {"ok": False, "error": str(e)}
+            return {
+                "ok": bool(r.get("ok")),
+                "error": "" if r.get("ok") else r.get("output", "failed"),
+            }
         known = {d.name: d for d in self.s.claude_config_dirs}
         config_dir = known.get(str(agent.get("login") or "")) or self.s.claude_config_dirs[0]
         r = await start_background(
@@ -336,7 +361,9 @@ class PersonalAssistant:
             if op == "act":
                 return await self.panels.act(str(p.get("act")), p.get("args") or {})
             if op == "run":
-                return await self.run(sessions, str(p.get("focus") or ""), p.get("agent"))
+                return await self.run(
+                    sessions, str(p.get("focus") or ""), p.get("agent"), p.get("endpoints")
+                )
             if op == "send_email":
                 body = p.get("body")
                 return await self.send_email(

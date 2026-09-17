@@ -161,8 +161,12 @@ async def _brief_openai(
     }
     if "openrouter.ai" in base_url:
         # reasoning models otherwise spend the whole budget thinking and return no text
-        body["reasoning"] = {"effort": a["effort"]}
+        body["reasoning"] = {"enabled": False} if a["effort"] == "none" else {"effort": a["effort"]}
         body["usage"] = {"include": True}
+    elif a["effort"] == "none":
+        body["chat_template_kwargs"] = {"enable_thinking": False}  # vLLM / Qwen: no thinking
+    else:
+        body["reasoning_effort"] = a["effort"]
     try:
         async with httpx.AsyncClient(timeout=100) as c:
             r = await c.post(

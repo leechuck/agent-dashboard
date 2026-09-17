@@ -618,7 +618,7 @@ class AgentsBody(BaseModel):
 
 _AGENT_FIELDS = {
     "advice": {"machine", "harness", "model", "login", "endpoint", "effort"},
-    "personal": {"machine", "model", "login"},
+    "personal": {"machine", "backend", "model", "login", "endpoint"},
     "titles": {"enabled", "model"},
 }
 
@@ -657,7 +657,11 @@ async def _pa(request: Request, payload: dict, timeout: float = 120) -> dict:
     agents = await _agents(request)
     prefer = agents["personal"]["machine"]
     if payload.get("op") == "run":
-        payload = {**payload, "agent": agents["personal"]}
+        payload = {
+            **payload,
+            "agent": agents["personal"],
+            "endpoints": await ck.endpoints_setting(st.db),
+        }
     order = sorted(st.nodes, key=lambda m: (m != prefer, m))
     if not order:
         raise HTTPException(503, "no machine is online")

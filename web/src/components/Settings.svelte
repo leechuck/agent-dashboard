@@ -23,6 +23,30 @@
   const adviceModels = $derived(av ? modelsFor(av.agents.advice.harness, av.agents.advice.endpoint) : [])
   const claudeModels = $derived((mc?.models.claude ?? []).filter((m) => m.id))
   const apiEndpoints = $derived((cat?.endpoints ?? []).filter((e) => e.base_url))
+  const claudeEndpoints = $derived((cat?.endpoints ?? []).filter((e) => e.anthropic_base_url))
+  const personalModels = $derived(av ? modelsFor('api', av.agents.personal.endpoint) : [])
+  const EFFORTS: Record<string, string[]> = {
+    claude: ['low', 'medium', 'high', 'xhigh', 'max'],
+    codex: ['minimal', 'low', 'medium', 'high', 'xhigh'],
+    api: ['none', 'low', 'medium', 'high'],
+  }
+  const efforts = (harness: string) => EFFORTS[harness] ?? EFFORTS.api
+  // a model or thinking level from the previous agent means nothing to the new one
+  function fitAdvice() {
+    if (!av) return
+    const a = av.agents.advice
+    const list = modelsFor(a.harness, a.endpoint)
+    if (!list.some((m) => m.id === a.model)) a.model = a.harness === 'api' ? (list[0]?.id ?? '') : ''
+    if (!efforts(a.harness).includes(a.effort)) a.effort = 'low'
+    if (a.harness !== 'api' && av.agents.titles.model && !modelsFor(a.harness, '').some((m) => m.id === av!.agents.titles.model)) av.agents.titles.model = ''
+    if (a.harness === 'api') av.agents.titles.model = ''
+  }
+  function fitPersonal() {
+    if (!av) return
+    const p = av.agents.personal
+    const list = p.backend === 'endpoint' ? modelsFor('api', p.endpoint) : claudeModels
+    if (!list.some((m) => m.id === p.model)) p.model = p.backend === 'endpoint' ? (list[0]?.id ?? '') : ''
+  }
 
   // ----- endpoints
   let endpoints = $state<Endpoint[]>([])
@@ -164,7 +188,7 @@
       <div class="lead">Advice <span class="small muted">(Overview, on request only)</span></div>
       <div class="grid">
         <label>Agent
-          <select bind:value={av.agents.advice.harness}>
+          <select bind:value={av.agents.advice.harness} onchange={fitAdvice}>
             <option value="claude">Claude Code (subscription)</option>
             <option value="codex">Codex (subscription)</option>
             <option value="api">One of my endpoints</option>
@@ -172,22 +196,27 @@
         </label>
         {#if av.agents.advice.harness === 'api'}
           <label>Endpoint
-            <select bind:value={av.agents.advice.endpoint}>
+            <select bind:value={av.agents.advice.endpoint} onchange={fitAdvice}>
               <option value="">choose…</option>
               {#each apiEndpoints as e (e.id)}<option value={e.id}>{e.name || e.id}</option>{/each}
             </select>
           </label>
         {/if}
         <label>Model
-          <select bind:value={av.agents.advice.model}>
-            {#if av.agents.advice.harness !== 'api'}<option value="">as configured</option>{/if}
-            {#each adviceModels as m (m.id)}<option value={m.id}>{m.label}</option>{/each}
-            {#if av.agents.advice.model && !adviceModels.some((m) => m.id === av!.agents.advice.model)}<option value={av.agents.advice.model}>{av.agents.advice.model}</option>{/if}
-          </select>
+          {#if av.agents.advice.harness === 'api' && !adviceModels.length}
+            <input bind:value={av.agents.advice.model} placeholder="model name on that server" />
+          {:else}
+            <select bind:value={av.agents.advice.model}>
+              {#if av.agents.advice.harness !== 'api'}<option value="">as configured</option>{/if}
+              {#each adviceModels as m (m.id)}<option value={m.id}>{m.label}</option>{/each}
+              {#if av.agents.advice.model && !adviceModels.some((m) => m.id === av!.agents.advice.model)}<option value={av.agents.advice.model}>{av.agents.advice.model}</option>{/if}
+            </select>
+          {/if}
         </label>
         <label>Thinking
           <select bind:value={av.agents.advice.effort}>
-            {#each ['low', 'medium', 'high'] as e}<option value={e}>{e}</option>{/each}
+            {#each efforts(av.agents.advice.harness) as e}<option value={e}>{e === 'none' ? 'off' : e}</option>{/each}
+            {#if !efforts(av.agents.advice.harness).includes(av.agents.advice.effort)}<option value={av.agents.advice.effort}>{av.agents.advice.effort}</option>{/if}
           </select>
         </label>
         <label>Runs on
@@ -210,11 +239,37 @@
     <div class="card">
       <div class="lead">Personal briefing <span class="small muted">(Claude Code session in ~/pa)</span></div>
       <div class="grid">
-        <label>Model
-          <select bind:value={av.agents.personal.model}>
-            <option value="">as configured</option>
-            {#each claudeModels as m (m.id)}<option value={m.id}>{m.label}</option>{/each}
+        <label>Tokens from
+          <select bind:value={av.agents.personal.backend} onchange={fitPersonal}>
+            <option value="login">Claude subscription</option>
+            <option value="endpoint">One of my endpoints</option>
           </select>
+        </label>
+        {#if av.agents.personal.backend === 'endpoint'}
+          <label>Endpoint
+            <select bind:value={av.agents.personal.endpoint} onchange={fitPersonal}>
+              <option value="">choose…</option>
+              {#each claudeEndpoints as e (e.id)}<option value={e.id}>{e.name || e.id}</option>{/each}
+            </select>
+          </label>
+        {/if}
+        <label>Model
+          {#if av.agents.personal.backend === 'endpoint'}
+            {#if personalModels.length}
+              <select bind:value={av.agents.personal.model}>
+                {#each personalModels as m (m.id)}<option value={m.id}>{m.label}</option>{/each}
+                {#if av.agents.personal.model && !personalModels.some((m) => m.id === av!.agents.personal.model)}<option value={av.agents.personal.model}>{av.agents.personal.model}</option>{/if}
+              </select>
+            {:else}
+              <input bind:value={av.agents.personal.model} placeholder="model name on that server" />
+            {/if}
+          {:else}
+            <select bind:value={av.agents.personal.model}>
+              <option value="">as configured</option>
+              {#each claudeModels as m (m.id)}<option value={m.id}>{m.label}</option>{/each}
+              {#if av.agents.personal.model && !claudeModels.some((m) => m.id === av!.agents.personal.model)}<option value={av.agents.personal.model}>{av.agents.personal.model}</option>{/if}
+            </select>
+          {/if}
         </label>
         <label>Runs on
           <select bind:value={av.agents.personal.machine}>
@@ -222,7 +277,7 @@
             {#each av.machines as m}<option value={m}>{m}</option>{/each}
           </select>
         </label>
-        {#if av.logins.length > 1}
+        {#if av.agents.personal.backend !== 'endpoint' && av.logins.length > 1}
           <label>Claude login
             <select bind:value={av.agents.personal.login}>
               <option value="">default</option>
@@ -238,15 +293,20 @@
       <div class="grid">
         <label class="check"><input type="checkbox" bind:checked={av.agents.titles.enabled} /> Name sessions after what they are working on</label>
         <label>Model
-          <select bind:value={av.agents.titles.model}>
-            {#each adviceModels as m (m.id)}<option value={m.id}>{m.label}</option>{/each}
-            {#if av.agents.titles.model && !adviceModels.some((m) => m.id === av!.agents.titles.model)}<option value={av.agents.titles.model}>{av.agents.titles.model}</option>{/if}
-          </select>
+          {#if av.agents.advice.harness === 'api' && !adviceModels.length}
+            <input bind:value={av.agents.titles.model} placeholder="same as advice" />
+          {:else}
+            <select bind:value={av.agents.titles.model}>
+              <option value="">{av.agents.advice.harness === 'api' ? 'same as advice' : 'small (haiku)'}</option>
+              {#each adviceModels as m (m.id)}<option value={m.id}>{m.label}</option>{/each}
+              {#if av.agents.titles.model && !adviceModels.some((m) => m.id === av!.agents.titles.model)}<option value={av.agents.titles.model}>{av.agents.titles.model}</option>{/if}
+            </select>
+          {/if}
         </label>
         <label>&nbsp;<button type="button" onclick={regenerateTitles}>Name all sessions again</button></label>
       </div>
       {#if titlesMsg}<p class="small muted inner">{titlesMsg}</p>{/if}
-      <p class="small muted inner">Titles you typed yourself are kept. One small call, only when a session is new or was asked something new, at most every 15 minutes. Uses the advice agent and machine above with this model.</p>
+      <p class="small muted inner">Titles you typed yourself are kept. One small call, only when a session is new or was asked something new, at most every 15 minutes. Runs with the advice agent, endpoint, thinking and machine above, with this model.</p>
     </div>
 
     <div class="row"><span class="small muted">{saved}</span><button class="primary" onclick={saveAgents}>Save</button></div>
@@ -265,6 +325,7 @@
             <select bind:value={e.wire_api}><option value="chat">chat completions</option><option value="responses">responses</option></select>
           </label>
           <label>Context window <input type="number" bind:value={e.context_window} placeholder="131072" /></label>
+          <label>Models <span class="hint">(comma-separated; empty = ask the server)</span><input value={(e.models ?? []).join(', ')} oninput={(ev) => (e.models = ev.currentTarget.value.split(',').map((m) => m.trim()).filter(Boolean))} placeholder="qwen3.8-27b" /></label>
         </div>
         <div class="status small">
           {#each epStatus(e.id) as st (st.m)}<span class:good={st.ok} class:bad={!st.ok}>{st.m}: {st.ok ? st.why : st.why}</span>{/each}

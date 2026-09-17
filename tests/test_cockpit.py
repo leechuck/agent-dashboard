@@ -519,3 +519,14 @@ async def test_usage_for_a_login_a_machine_no_longer_has_is_dropped(tmp_path):
     await db.forget_gone_accounts("lc-dell", "anthropic", [])  # a failed poll deletes nothing
     assert len(await db.latest_usage()) == 3
     await db.close()
+
+
+def test_titles_follow_the_advice_endpoint_model_unless_set():
+    on_api = ck.agent_settings(
+        {"advice": {"harness": "api", "model": "qwen3.8-27b"}, "titles": {"model": ""}}
+    )
+    assert ck.title_model(on_api) == "qwen3.8-27b"
+    on_claude = ck.agent_settings({"titles": {"model": ""}})
+    assert ck.title_model(on_claude) == "haiku"
+    own = ck.agent_settings({"advice": {"harness": "api", "model": "x"}, "titles": {"model": "y"}})
+    assert ck.title_model(own) == "y"

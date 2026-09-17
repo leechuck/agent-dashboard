@@ -174,3 +174,26 @@ def test_a_message_sent_from_the_dashboard_reads_as_the_owner_speaking():
         {"type": "user", "uuid": "u3", "isMeta": True, "message": {"role": "user", "content": "x"}}
     )[0]
     assert meta.is_meta and meta.sender == ""
+
+
+async def test_briefing_can_run_claude_code_on_an_endpoint(pa, monkeypatch):
+    import agentdash.node.pa as pa_mod
+
+    seen = {}
+
+    async def fake_launch(spec, s, endpoints):
+        seen["spec"], seen["endpoints"] = spec, endpoints
+        return {"ok": True}
+
+    monkeypatch.setattr(pa_mod, "launch", fake_launch)
+    agent = {"backend": "endpoint", "endpoint": "borg", "model": "qwen3.8-27b"}
+    eps = [{"id": "borg", "anthropic_base_url": "http://h:8000", "key_env": "K"}]
+    assert (await pa.run({}, "", agent, eps))["ok"]
+    spec = seen["spec"]
+    assert (spec.backend, spec.endpoint, spec.model, spec.mode) == (
+        "endpoint",
+        "borg",
+        "qwen3.8-27b",
+        "background",
+    )
+    assert seen["endpoints"][0].anthropic_base_url == "http://h:8000"

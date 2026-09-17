@@ -269,7 +269,7 @@ export interface PAActResult {
 
 export interface AgentSettings {
   advice: { machine: string; harness: 'claude' | 'codex' | 'api'; model: string; login: string; endpoint: string; effort: string }
-  personal: { machine: string; model: string; login: string }
+  personal: { machine: string; backend: 'login' | 'endpoint'; model: string; login: string; endpoint: string }
   titles: { enabled: boolean; model: string }
 }
 

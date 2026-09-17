@@ -810,6 +810,7 @@ DEFAULT_ENDPOINTS: list[dict[str, Any]] = [
         "key_env": "BORG_LLM_API_KEY",
         "wire_api": "responses",
         "context_window": 131072,
+        "models": ["qwen3.8-27b"],
     },
 ]
 
@@ -822,7 +823,8 @@ AGENT_DEFAULTS: dict[str, dict[str, Any]] = {
         "endpoint": "",  # for harness api: which configured endpoint
         "effort": "low",
     },
-    "personal": {"machine": "", "model": "", "login": ""},
+    # backend "login": Claude Code on a subscription; "endpoint": Claude Code on one of my endpoints
+    "personal": {"machine": "", "backend": "login", "model": "", "login": "", "endpoint": ""},
     "titles": {"enabled": True, "model": "haiku"},
 }
 
@@ -912,6 +914,14 @@ def parse_titles(text: str, allowed: set[str]) -> dict[str, str]:
 MANUAL = "manual"
 
 
+def title_model(agents: dict[str, Any]) -> str:
+    """The titles' own model; empty means the advice model (on an endpoint) or a small Claude."""
+    advice = agents["advice"]
+    if agents["titles"].get("model"):
+        return str(agents["titles"]["model"])
+    return str(advice.get("model") or "") if advice.get("harness") == "api" else "haiku"
+
+
 class Titler:
     """Keeps a readable title per session, renamed only when what it was asked changes."""
 
@@ -981,7 +991,7 @@ class Titler:
                 for s in todo[:25]
             ]
         }
-        agent = {**agents["advice"], "model": agents["titles"].get("model") or "haiku"}
+        agent = {**agents["advice"], "model": title_model(agents)}
         try:
             res = await ask_model(state, TITLE_PROMPT, digest, agent)
             named = parse_titles(res.get("text", ""), {s.key for s in todo})
