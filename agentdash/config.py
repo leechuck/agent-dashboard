@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     history_url: str = "http://127.0.0.1:8080"  # agentsview API, proxied under /history
     history_token: str = ""
     history_public_url: str = ""  # agentsview UI as reachable from the phone (deep links)
+    push_subject: str = "mailto:agentdash@example.com"  # VAPID contact, set yours in .env
     keep_usage_days: int = 30
     keep_events_days: int = 90
 

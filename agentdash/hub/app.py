@@ -60,7 +60,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="agentdash hub", lifespan=lifespan)
     app.state.settings = settings
-    app.state.hub = HubState(db, bus, Pusher(settings.state_dir))
+    app.state.hub = HubState(db, bus, Pusher(settings.state_dir, settings.push_subject))
     app.add_middleware(ClientGuard, cidrs=settings.hub_allowed_cidrs)
     app.include_router(api_router)
     app.include_router(ws_router)

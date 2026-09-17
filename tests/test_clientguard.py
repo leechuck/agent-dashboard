@@ -3,8 +3,8 @@ from agentdash.hub.clientguard import client_allowed
 
 def test_loopback_and_tailnet_allowed():
     assert client_allowed("127.0.0.1")
-    assert client_allowed("100.84.109.108")
-    assert client_allowed("fd7a:115c:a1e0::4401:53bd")
+    assert client_allowed("100.100.1.2")
+    assert client_allowed("fd7a:115c:a1e0::1")
 
 
 def test_lan_and_garbage_denied():
