@@ -36,9 +36,12 @@
 </script>
 
 {#if m.kind === 'text' && m.role === 'user'}
-  <div class="msg user" class:meta={m.is_meta}>
-    <span class="mark">❯</span>
-    <div class="body"><pre class="plain">{m.text}</pre><span class="when">{clock(m.ts)}</span></div>
+  <div class="msg user" class:meta={m.is_meta} class:sent={!!m.sender}>
+    <span class="mark">{m.sender ? '⤷' : '❯'}</span>
+    <div class="body">
+      <pre class="plain">{m.text}</pre>
+      <span class="when">{#if m.sender}<span class="via">{m.sender === 'dashboard' ? 'you, from the dashboard' : `from ${m.sender}`}</span> · {/if}{clock(m.ts)}</span>
+    </div>
   </div>
 {:else if m.kind === 'text'}
   <div class="msg agent" class:meta={m.is_meta} class:sub={!!m.agent_id}>
@@ -86,6 +89,8 @@
   .when { display: block; margin-top: 2px; font-size: 11.5px; color: var(--muted); }
   .msg.user { margin: 10px 0 6px; padding-top: 9px; padding-bottom: 9px; background: var(--cobalt-soft); border-left: 3px solid var(--cobalt); }
   .msg.user .mark { color: var(--cobalt); font-weight: 600; }
+  .msg.user.sent { border-left-style: dashed; }
+  .via { color: var(--cobalt); font-weight: 600; }
   .msg.agent .mark { color: var(--ink); }
   .msg.agent.sub .mark { color: var(--amber); }
   .msg.meta { opacity: .65; }

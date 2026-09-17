@@ -69,6 +69,7 @@ class Message(BaseModel):
     is_error: bool = False
     is_meta: bool = False
     agent_id: str = ""
+    sender: str = ""  # who sent it if not the person at the terminal ("dashboard", a peer)
 
 
 class Machine(BaseModel):

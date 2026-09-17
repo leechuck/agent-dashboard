@@ -68,6 +68,8 @@ export interface Message {
   is_error: boolean
   is_meta: boolean
   agent_id: string
+  /** set when it did not come from the terminal: "dashboard", or a peer session */
+  sender?: string
   /** long tool input or output was cut for the list; the full message is fetched on open */
   slim?: boolean
 }

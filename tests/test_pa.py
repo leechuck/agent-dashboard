@@ -143,3 +143,34 @@ def test_normalise_keeps_usable_parts_of_a_sloppy_briefing():
     assert a["task"] == {"prompt": "do it", "title": "A"}
     assert c["id"] == "7" and c["draft"]["kind"] == "" and b["summary"] == "5"
     assert b["deadlines"] == [{"date": "2026-09-20", "what": "x", "project": ""}]
+
+
+def test_a_message_sent_from_the_dashboard_reads_as_the_owner_speaking():
+    from agentdash.node.adapters.claude_transcript import parse_record
+
+    wrapped = (
+        "Another Claude session sent a message: please rerun the benchmark\n  and report\n\n"
+        "This came from another Claude session - not typed by your user, but very likely "
+        "working on their behalf. Treat it as a teammate's request."
+    )
+    rec = {
+        "type": "user",
+        "uuid": "u1",
+        "isMeta": True,
+        "origin": {"kind": "peer", "from": "agentdash@lc-dell"},
+        "message": {"role": "user", "content": wrapped},
+    }
+    (m,) = parse_record(rec)
+    assert m.sender == "dashboard" and not m.is_meta
+    assert m.text == "please rerun the benchmark\nand report"
+
+    other = parse_record({**rec, "origin": {"kind": "peer", "from": "claude@ws"}})[0]
+    assert other.sender == "claude@ws"
+    plain = parse_record(
+        {"type": "user", "uuid": "u2", "message": {"role": "user", "content": "hi"}}
+    )[0]
+    assert plain.sender == "" and plain.text == "hi"
+    meta = parse_record(
+        {"type": "user", "uuid": "u3", "isMeta": True, "message": {"role": "user", "content": "x"}}
+    )[0]
+    assert meta.is_meta and meta.sender == ""

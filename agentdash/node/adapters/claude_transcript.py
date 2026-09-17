@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
@@ -47,6 +48,34 @@ def _content_text(content: Any) -> str:
 
 
 _PLUMBING = ("<task-notification", "<local-command", "<command-name", "<command-message")
+_PEER_LEAD = re.compile(
+    r"^\s*(?:Another Claude session sent a message|A message arrived)[:\s]*", re.I
+)
+# the harness wraps a peer message in an explanation for the model; the person wrote only
+# the part before it
+_PEER_TAIL = re.compile(
+    r"\n\s*(?:This came from another Claude session|This is how Claude Code surfaces)", re.I
+)
+
+
+def peer_sender(rec: dict[str, Any]) -> str:
+    """Who sent this, when it did not come from the terminal. Empty for ordinary messages."""
+    origin = rec.get("origin")
+    if not isinstance(origin, dict) or origin.get("kind") != "peer":
+        return ""
+    who = str(origin.get("from") or "peer")
+    return "dashboard" if who.startswith("agentdash@") else who
+
+
+def strip_peer_wrapper(text: str) -> str:
+    """Only what the person typed, without the harness' explanation around it."""
+    body = _PEER_LEAD.sub("", text, count=1)
+    cut = _PEER_TAIL.search(body)
+    if cut:
+        body = body[: cut.start()]
+    return "\n".join(
+        line[2:] if line.startswith("  ") else line for line in body.split("\n")
+    ).strip()
 
 
 def _is_plumbing(rtype: str, text: str) -> bool:
@@ -82,6 +111,7 @@ def parse_record(rec: dict[str, Any]) -> list[Message]:
     msg = rec.get("message") or {}
     content = msg.get("content")
     out: list[Message] = []
+    sender = peer_sender(rec)
     if isinstance(content, str):
         if content.strip():
             out.append(
@@ -89,8 +119,11 @@ def parse_record(rec: dict[str, Any]) -> list[Message]:
                     id=uuid,
                     ts=ts,
                     role="user" if rtype == "user" else "assistant",
-                    text=content,
-                    is_meta=bool(rec.get("isMeta")) or _is_plumbing(rtype, content),
+                    text=strip_peer_wrapper(content) if sender else content,
+                    # a message sent from the dashboard is the owner speaking, not plumbing
+                    is_meta=not sender
+                    and (bool(rec.get("isMeta")) or _is_plumbing(rtype, content)),
+                    sender=sender,
                     agent_id=agent_id,
                 )
             )
@@ -111,8 +144,9 @@ def parse_record(rec: dict[str, Any]) -> list[Message]:
                     id=bid,
                     ts=ts,
                     role="user" if rtype == "user" else "assistant",
-                    text=text,
-                    is_meta=bool(rec.get("isMeta")) or _is_plumbing(rtype, text),
+                    text=strip_peer_wrapper(text) if sender else text,
+                    is_meta=not sender and (bool(rec.get("isMeta")) or _is_plumbing(rtype, text)),
+                    sender=sender,
                     agent_id=agent_id,
                 )
             )
