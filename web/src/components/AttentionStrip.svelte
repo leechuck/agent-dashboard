@@ -1,6 +1,6 @@
 <script lang="ts">
   import { fleet } from '../lib/store.svelte'
-  import { shortCwd } from '../lib/format'
+  import { displayName, shortCwd } from '../lib/format'
   import DecisionCard from './DecisionCard.svelte'
   const pending = $derived(fleet.pendingDecisions)
   const waiting = $derived(fleet.waiting)
@@ -24,7 +24,7 @@
     <div class="body">
       <div class="lead">{waiting.length === 1 ? 'session is waiting for you' : 'sessions are waiting for you'}</div>
       <a class="which" href={`#/session/${encodeURIComponent(first.key)}`}>
-        {first.name || first.session_id.slice(0, 8)} on {first.machine}
+        {displayName(first)} on {first.machine}
         {#if first.waiting_for}<span class="muted"> needs {first.waiting_for}</span>{/if}
       </a>
       <div class="cwd muted small">{shortCwd(first.cwd)}</div>

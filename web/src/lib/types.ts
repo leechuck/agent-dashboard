@@ -200,3 +200,15 @@ export interface PAState {
   workspaces: PAWorkspace[]
   roots: PAWorkspace[]
 }
+
+export interface AgentSettings {
+  advice: { machine: string; harness: 'claude' | 'codex' | 'api'; model: string; login: string; effort: string }
+  personal: { machine: string; model: string; login: string }
+  titles: { enabled: boolean; model: string }
+}
+
+export interface AgentSettingsView {
+  agents: AgentSettings
+  machines: string[]
+  logins: { dir: string; account: string }[]
+}

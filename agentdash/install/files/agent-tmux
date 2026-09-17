@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# agent-tmux: run a coding agent inside its own tmux session, so the agent dashboard can
+# type into it (prompts for Codex and others, slash commands like /compact for all) and
+# show its terminal. Inside tmux already, it just runs the command.
+#
+#   agent-tmux codex            agent-tmux claude --resume
+#   alias codex='agent-tmux codex'   (see `agentdash install launcher`)
+set -euo pipefail
+[ $# -ge 1 ] || { echo "usage: agent-tmux <command> [args...]" >&2; exit 2; }
+if [ -n "${TMUX:-}" ] || ! command -v tmux >/dev/null; then exec "$@"; fi
+name="$(basename "$1")-$(basename "$PWD" | tr -c 'A-Za-z0-9_-' '_')-$$"
+# -e hands the agent this shell's environment for the variables that matter to it
+envs=()
+for v in PATH CLAUDE_CONFIG_DIR OPENROUTER_API_KEY ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY OPENAI_API_KEY SSH_AUTH_SOCK DISPLAY; do
+  if [ -n "${!v+x}" ]; then envs+=(-e "$v=${!v}"); fi
+done
+exec tmux new-session -s "$name" -c "$PWD" "${envs[@]}" -- "$@"

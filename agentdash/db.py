@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS usage_snapshots (
   fetched_at INTEGER, data TEXT
 );
 CREATE INDEX IF NOT EXISTS usage_pw ON usage_snapshots(provider, window, fetched_at);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS titles (
+  key TEXT PRIMARY KEY, title TEXT, basis TEXT, at INTEGER
+);
 CREATE TABLE IF NOT EXISTS cockpit_silenced (
   id TEXT PRIMARY KEY, title TEXT, until INTEGER, created_at INTEGER
 );
@@ -274,6 +278,36 @@ class Database:
                WHERE provider=? AND account IN ('', ?) AND account != ?""",
             (account, account, provider, plan, account),
         )
+        await self.db.commit()
+
+    # settings and titles ----------------------------------------------
+    async def get_setting(self, key: str) -> dict[str, Any]:
+        cur = await self.db.execute("SELECT value FROM settings WHERE key=?", (key,))
+        row = await cur.fetchone()
+        try:
+            return json.loads(row["value"]) if row else {}
+        except json.JSONDecodeError:
+            return {}
+
+    async def set_setting(self, key: str, value: dict[str, Any]) -> None:
+        await self.db.execute(
+            "INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (key, json.dumps(value))
+        )
+        await self.db.commit()
+
+    async def titles(self) -> dict[str, dict[str, Any]]:
+        cur = await self.db.execute("SELECT key, title, basis, at FROM titles")
+        return {r["key"]: dict(r) for r in await cur.fetchall()}
+
+    async def set_title(self, key: str, title: str, basis: str) -> None:
+        await self.db.execute(
+            "INSERT OR REPLACE INTO titles(key,title,basis,at) VALUES(?,?,?,?)",
+            (key, title, basis, now_ms()),
+        )
+        await self.db.commit()
+
+    async def prune_titles(self, keep_ms: int) -> None:
+        await self.db.execute("DELETE FROM titles WHERE at < ?", (now_ms() - keep_ms,))
         await self.db.commit()
 
     # cockpit ----------------------------------------------------------

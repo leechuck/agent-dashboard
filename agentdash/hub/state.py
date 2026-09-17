@@ -27,7 +27,7 @@ from ..models import (
     now_ms,
 )
 from .bus import EventBus
-from .cockpit import Briefer
+from .cockpit import Briefer, Titler
 from .push import Pusher
 
 
@@ -51,6 +51,7 @@ class HubState:
         self.pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._usage_alerted: dict[str, int] = {}  # provider:window -> threshold pushed
         self.briefer = Briefer()
+        self.titler = Titler()
 
     def node_for(self, session_key: str) -> NodeLink | None:
         machine = session_key.split(":", 1)[0]

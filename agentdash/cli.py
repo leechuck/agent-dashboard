@@ -142,6 +142,28 @@ def install_statusline_cmd(
         typer.echo(f"statusline sidecar installed into {d / 'settings.json'}")
 
 
+@install_app.command("launcher")
+def install_launcher_cmd() -> None:
+    """Install agent-tmux, which starts an agent inside tmux so the dashboard can type into it."""
+    import shutil
+    from importlib import resources
+    from pathlib import Path
+
+    dst = Path.home() / ".local" / "bin" / "agent-tmux"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with resources.as_file(resources.files("agentdash.install") / "files" / "agent-tmux") as src:
+        shutil.copy2(src, dst)
+    dst.chmod(0o755)
+    typer.echo(f"installed {dst}")
+    typer.echo(
+        "\nTo start agents in tmux by default, add to ~/.bashrc:\n"
+        "  alias codex='agent-tmux codex'\n"
+        "  alias claude='agent-tmux claude'\n"
+        "  alias pi='agent-tmux pi'\n"
+        "Scrolling inside tmux: PgUp/PgDn, or put `set -g mouse on` in ~/.tmux.conf."
+    )
+
+
 @install_app.command("account")
 def install_account_cmd(
     name: str = typer.Argument(..., help='short name of the login, e.g. "team"'),

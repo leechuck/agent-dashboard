@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
   import { Fleet, fleet } from '../lib/store.svelte'
-  import { ago } from '../lib/format'
+  import { ago, displayName } from '../lib/format'
   import type { PAItem, PAState } from '../lib/types'
 
   let { wide = false }: { wide?: boolean } = $props()
@@ -139,10 +139,10 @@
       'hand',
       async () => {
         const r = await api.prompt(key, text)
-        if (r.ok) await api.paItem(item.id, 'mark', { status: 'delegated', note: `sent to ${fleet.sessions[key]?.name ?? key}` })
+        if (r.ok) await api.paItem(item.id, 'mark', { status: 'delegated', note: `sent to ${displayName(fleet.sessions[key], key)}` })
         return r
       },
-      `Sent to ${fleet.sessions[key]?.name ?? 'the agent'}.`,
+      `Sent to ${displayName(fleet.sessions[key], key)}.`,
     )
   }
   function tellPA(item: PAItem, text: string, okText: string) {
@@ -265,7 +265,7 @@
                   <div class="acts">
                     <select value={agent[item.id] ?? ''} onchange={(e) => (agent[item.id] = e.currentTarget.value)} aria-label="running agent">
                       <option value="">a running agent…</option>
-                      {#each agents as s (s.key)}<option value={s.key}>{s.name || s.session_id.slice(0, 8)} · {s.machine} · {s.status}</option>{/each}
+                      {#each agents as s (s.key)}<option value={s.key}>{displayName(s)} · {s.machine} · {s.status}</option>{/each}
                     </select>
                     <button disabled={!agent[item.id] || !!busy[item.id]} onclick={() => handOver(item)}>{busy[item.id] === 'hand' ? 'Sending…' : 'Hand over'}</button>
                   </div>

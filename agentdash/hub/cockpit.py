@@ -727,17 +727,53 @@ def parse_briefing(text: str) -> dict[str, Any]:
     }
 
 
-class Briefer:
-    """Caches one briefing and refreshes it through a node when the fleet has changed."""
+async def ask_model(
+    state: Any, system: str, digest: dict[str, Any], agent: dict[str, Any], prefer: str = ""
+) -> dict[str, Any]:
+    """Run one model call on a node (the preferred machine first). Raises RuntimeError."""
+    order = sorted(state.nodes, key=lambda m: (m != (agent.get("machine") or prefer), m))
+    if not order:
+        raise RuntimeError("no machine is online to run the model")
+    last = "no online machine can run this agent (needs a logged-in claude or codex, or an API key)"
+    for machine in order:
+        res = await state.request(
+            state.nodes[machine],
+            "cockpit.brief",
+            {"system": system, "digest": digest, "agent": agent},
+            timeout=180,
+        )
+        if res.get("ok"):
+            return {**res, "via": machine}
+        if res.get("error") != "no key":
+            last = f"{machine}: {res.get('error', 'failed')}"
+    raise RuntimeError(last)
 
-    def __init__(self, min_interval: float = 600.0) -> None:
-        self.min_interval = min_interval
-        self.preferred = ""  # machine id from settings
+
+AGENT_DEFAULTS: dict[str, dict[str, Any]] = {
+    "advice": {"machine": "", "harness": "claude", "model": "sonnet", "login": "", "effort": "low"},
+    "personal": {"machine": "", "model": "", "login": ""},
+    "titles": {"enabled": True, "model": "haiku"},
+}
+
+
+def agent_settings(
+    stored: dict[str, Any], cockpit_node: str = "", pa_node: str = ""
+) -> dict[str, Any]:
+    """Stored settings over defaults; machines fall back to what the hub's .env names."""
+    out = {k: {**v, **(stored.get(k) or {})} for k, v in AGENT_DEFAULTS.items()}
+    out["advice"]["machine"] = out["advice"]["machine"] or cockpit_node
+    out["personal"]["machine"] = out["personal"]["machine"] or pa_node or cockpit_node
+    return out
+
+
+class Briefer:
+    """Holds the last advice the model gave. It is generated only when the owner asks."""
+
+    def __init__(self) -> None:
         self.briefing: dict[str, Any] | None = None
         self.error = ""
         self.generating = False
         self._lock = asyncio.Lock()
-        self._node = ""  # the node that last produced a briefing
 
     def view(self, current_fp: str) -> dict[str, Any]:
         b = self.briefing
@@ -748,54 +784,122 @@ class Briefer:
             "error": self.error,
         }
 
-    async def refresh(self, state: Any, d: dict[str, Any], force: bool = False) -> None:
-        fp = fingerprint(d)
-        b = self.briefing
-        if not force and b:
-            if (
-                b.get("fingerprint") == fp
-                or now_ms() - b["generated_at"] < self.min_interval * 1000
-            ):
-                return
+    async def refresh(self, state: Any, d: dict[str, Any], agent: dict[str, Any]) -> None:
         if self._lock.locked():
             return
         async with self._lock:
             self.generating = True
             state.bus.publish("cockpit.updated", {"generating": True})
             try:
-                order = sorted(state.nodes, key=lambda m: (m != self.preferred, m != self._node, m))
-                if not order:
-                    raise RuntimeError("no node online to run the briefing")
-                last = "no online node can run the model (needs a logged-in claude, or an API key)"
-                for machine in order:
-                    res = await state.request(
-                        state.nodes[machine],
-                        "cockpit.brief",
-                        {"system": SYSTEM_PROMPT, "digest": d},
-                        timeout=120,
-                    )
-                    if res.get("ok"):
-                        parsed = parse_briefing(res.get("text", ""))
-                        self.briefing = {
-                            **parsed,
-                            "generated_at": now_ms(),
-                            "fingerprint": fp,
-                            "model": res.get("model", ""),
-                            "via": machine,
-                            "cost_usd": res.get("cost_usd"),
-                        }
-                        self._node, self.error = machine, ""
-                        break
-                    if res.get("error") != "no key":
-                        last = f"{machine}: {res.get('error', 'failed')}"
-                else:
-                    self.error = last
+                res = await ask_model(state, SYSTEM_PROMPT, d, agent)
+                self.briefing = {
+                    **parse_briefing(res.get("text", "")),
+                    "generated_at": now_ms(),
+                    "fingerprint": fingerprint(d),
+                    "model": res.get("model", ""),
+                    "via": res["via"],
+                    "cost_usd": res.get("cost_usd"),
+                }
+                self.error = ""
             except (TimeoutError, RuntimeError, ValueError, json.JSONDecodeError) as e:
                 self.error = str(e) or e.__class__.__name__
-                log.warning("cockpit briefing failed: %s", self.error)
+                log.warning("advice failed: %s", self.error)
             finally:
                 self.generating = False
                 state.bus.publish("cockpit.updated", {"generating": False})
+
+
+TITLE_PROMPT = """You name coding-agent sessions for a dashboard. The JSON lists sessions with the \
+first request of the session, the latest request, an optional standing goal, the working directory and \
+the last output. Give each a title that tells the owner at a glance what the work is about NOW.
+
+Rules: 3 to 7 words. Name the concrete subject (which paper, feature, bug, dataset, benchmark, review), \
+not the tool and not filler like "working on" or "session". If the latest request moved to a new topic, \
+title the new topic; if it is only "continue", "status?" or similar, use the goal or the first request. \
+Sentence case, no quotes, no trailing period. Reply with JSON only: {"titles": {"<key>": "<title>"}}"""
+
+
+def title_basis(s: Session) -> str:
+    text = "|".join(str(s.extra.get(k) or "") for k in ("first_user", "last_user", "goal"))
+    return hashlib.sha256(text.encode()).hexdigest()[:16] if text.strip("|") else ""
+
+
+def parse_titles(text: str, allowed: set[str]) -> dict[str, str]:
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("no JSON object in reply")
+    raw = json.loads(text[start : end + 1]).get("titles") or {}
+    out = {}
+    for key, title in raw.items() if isinstance(raw, dict) else []:
+        clean = " ".join(str(title).split()).strip("\"'.")[:70]
+        if key in allowed and clean:
+            out[key] = clean
+    return out
+
+
+class Titler:
+    """Keeps a readable title per session, renamed only when what it was asked changes."""
+
+    def __init__(self) -> None:
+        self.titles: dict[str, str] = {}
+        self.basis: dict[str, str] = {}
+        self.last_run = 0
+        self._loaded = False
+
+    async def load(self, db: Any) -> None:
+        for key, row in (await db.titles()).items():
+            self.titles[key], self.basis[key] = row["title"], row["basis"]
+        self._loaded = True
+
+    def apply(self, sessions: list[Session]) -> None:
+        for s in sessions:
+            if s.key in self.titles:
+                s.extra["title"] = self.titles[s.key]
+
+    async def tick(self, state: Any, agents: dict[str, Any]) -> int:
+        if not self._loaded:
+            await self.load(state.db)
+        if not agents["titles"].get("enabled") or not state.nodes:
+            return 0
+        now = now_ms()
+        live = [
+            s
+            for s in await state.db.list_sessions(active_only=True)
+            if s.harness != "tmux" and not s.extra.get("parent") and not is_stale(s, now)
+        ]
+        todo = [s for s in live if title_basis(s) and self.basis.get(s.key) != title_basis(s)]
+        if not todo:
+            return 0
+        untitled = any(s.key not in self.titles for s in todo)
+        if now - self.last_run < (120_000 if untitled else 900_000):
+            return 0
+        self.last_run = now
+        digest = {
+            "sessions": [
+                {
+                    "key": s.key,
+                    "dir": s.cwd,
+                    "first_request": s.extra.get("first_user", ""),
+                    "latest_request": s.extra.get("last_user", ""),
+                    "goal": s.extra.get("goal", ""),
+                    "last_output": s.last_line,
+                }
+                for s in todo[:25]
+            ]
+        }
+        agent = {**agents["advice"], "model": agents["titles"].get("model") or "haiku"}
+        try:
+            res = await ask_model(state, TITLE_PROMPT, digest, agent)
+            named = parse_titles(res.get("text", ""), {s.key for s in todo})
+        except (TimeoutError, RuntimeError, ValueError, json.JSONDecodeError) as e:
+            log.warning("titles failed: %s", e)
+            return 0
+        for s in todo:
+            if s.key in named:
+                self.titles[s.key] = named[s.key]
+                self.basis[s.key] = title_basis(s)
+                await state.db.set_title(s.key, named[s.key], self.basis[s.key])
+        return len(named)
 
 
 def to_json(findings: list[Finding]) -> list[dict[str, Any]]:

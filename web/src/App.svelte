@@ -11,7 +11,8 @@
   import NewSession from './components/NewSession.svelte'
   import Limits from './components/Limits.svelte'
   import TerminalView from './components/Terminal.svelte'
-  import Cockpit from './components/Cockpit.svelte'
+  import Overview from './components/Overview.svelte'
+  import PersonalBriefing from './components/PersonalBriefing.svelte'
 
   let route = $state(parse(location.hash))
 
@@ -21,7 +22,8 @@
     if (h === 'login') return { page: 'login' }
     if (h === 'settings') return { page: 'settings' }
     if (h === 'limits') return { page: 'limits' }
-    if (h === 'cockpit') return { page: 'cockpit' }
+    if (h === 'overview' || h === 'cockpit') return { page: 'overview' }
+    if (h === 'personal') return { page: 'personal' }
     if (h.startsWith('decisions')) return { page: 'decisions' }
     if (h.startsWith('history/')) return { page: 'history', key: decodeURIComponent(h.slice(8)) }
     if (h === 'history') return { page: 'history' }
@@ -46,6 +48,7 @@
   })
 
   let wide = $state(false)
+  const home = $derived(route.page === 'fleet')
   onMount(() => {
     const mq = window.matchMedia('(min-width: 960px)')
     const set = () => (wide = mq.matches)
@@ -61,8 +64,8 @@
   <TopBar />
   <main class:wide>
     {#if wide}
-      <aside><Fleet selected={route.key} /></aside>
-      <section>
+      <aside class:home><Fleet selected={route.key} layout={home ? 'board' : 'rail'} cockpitCard={home} /></aside>
+      <section class:home>
         {#if route.page === 'decisions'}
           <Decisions />
         {:else if route.page === 'settings'}
@@ -77,8 +80,10 @@
           <NewSession machine={route.q?.get('machine') ?? ''} resume={route.q?.get('resume') ?? ''} title={route.q?.get('cwd') ?? ''} />
         {:else if route.key}
           <SessionView key={route.key} />
-        {:else}
-          <Cockpit />
+        {:else if route.page === 'personal'}
+          <PersonalBriefing wide />
+        {:else if route.page === 'overview'}
+          <Overview />
         {/if}
       </section>
     {:else if route.page === 'decisions'}
@@ -95,24 +100,24 @@
       <NewSession machine={route.q?.get('machine') ?? ''} resume={route.q?.get('resume') ?? ''} title={route.q?.get('cwd') ?? ''} />
     {:else if route.page === 'session' && route.key}
       <SessionView key={route.key} />
-    {:else if route.page === 'cockpit'}
-      <Cockpit />
+    {:else if route.page === 'overview'}
+      <Overview />
+    {:else if route.page === 'personal'}
+      <PersonalBriefing />
     {:else}
-      <Fleet selected={undefined} cockpitCard />
+      <Fleet selected={undefined} cockpitCard layout="board" />
     {/if}
   </main>
 {/if}
 
 <style>
   main { max-width: 720px; margin: 0 auto; padding: 0 0 48px; }
-  main.wide {
-    max-width: none;
-    margin: 0;
-    display: grid;
-    grid-template-columns: 380px 1fr;
-    height: calc(100vh - 48px);
-  }
-  /* the sidebar scrolls on its own, so sticky headers inside it pin to its top, not below the top bar */
-  main.wide aside { border-right: 1px solid var(--hairline); overflow-y: auto; --sticky-top: 0px; }
-  main.wide section { overflow-y: auto; min-width: 0; --sticky-top: 0px; }
+  main.wide { max-width: none; margin: 0; padding: 0; display: flex; height: calc(100vh - 48px); overflow: hidden; }
+  /* home: the board fills the page. Anything else: the board folds into a rail and the page slides in. */
+  main.wide aside { flex: 0 0 340px; border-right: 1px solid var(--hairline); overflow-y: auto; --sticky-top: 0px; transition: flex-basis .28s cubic-bezier(.2, .8, .2, 1); }
+  main.wide aside.home { flex-basis: 100%; border-right: 0; }
+  main.wide section { flex: 1 1 0; overflow-y: auto; min-width: 0; --sticky-top: 0px; animation: slidein .28s cubic-bezier(.2, .8, .2, 1); }
+  main.wide section.home { display: none; }
+  @keyframes slidein { from { transform: translateX(32px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { main.wide aside { transition: none; } main.wide section { animation: none; } }
 </style>

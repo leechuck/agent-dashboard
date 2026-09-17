@@ -13,7 +13,9 @@ export function shortCwd(cwd: string | null | undefined): string {
   return (cwd ?? '').replace(/^\/home\/[^/]+/, '~')
 }
 
-export function statusLabel(s: string, waitingFor = ''): string {
+export function statusLabel(s: string, waitingFor = '', goal = false): string {
+  if (goal && s === 'busy') return 'busy · pursuing a goal'
+  if (goal && s === 'idle') return 'idle · goal still open'
   switch (s) {
     case 'waiting':
       return waitingFor ? `waiting for you: ${waitingFor}` : 'waiting for you'
@@ -62,4 +64,11 @@ export function contextOf(s: Session): { pct: number; window: string } | null {
   if (typeof x?.context_pct !== 'number') return null
   const w = Number(x.context_window) || 0
   return { pct: x.context_pct, window: w >= 1_000_000 ? `${w / 1_000_000}M` : w ? `${Math.round(w / 1000)}k` : '' }
+}
+
+/** The generated title when there is one (what the work is about), else the harness' own name. */
+export function displayName(s: Session | undefined, fallbackKey = ''): string {
+  if (!s) return fallbackKey.split(':').pop()?.slice(0, 8) ?? ''
+  const title = (s.extra as Record<string, any> | undefined)?.title
+  return (typeof title === 'string' && title) || s.name || s.session_id.slice(0, 8)
 }

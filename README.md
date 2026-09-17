@@ -6,22 +6,25 @@ office workstation and leechuck.de. Phone first.
 
 What it does:
 
-- **Cockpit**: one screen that says where you are needed. Deterministic rules
+- **Overview**: one screen that says where you are needed. Deterministic rules
   rank approvals, blocked sessions, limits about to run out (with burn rate and
   which harness still has room), context windows filling up, silent busy
-  sessions, agents sharing a directory, and stale sessions. On top of that a
-  model writes a short briefing: what each agent is doing and what to do next
+  sessions, agents sharing a directory, and stale sessions. When you ask for
+  it, a model adds advice: what each agent is doing and what to do next
   (answer, compact, hand off to a fresh session, fan out, switch harness),
-  with prompts you can send with one tap, edit first, or copy. The model is the
-  local `claude -p` on Sonnet using the subscription login of one node; no API
-  key is needed. Nothing is sent until you press Send (ADR 0004).
-- **Personal briefing** (in the Cockpit): starts the personal-assistant agent in
+  with prompts you can send with one tap, edit first, or copy. Which agent
+  gives the advice (Claude Code, Codex or an API endpoint, model, machine) is
+  set on the Settings page; it runs only on request (ADR 0004).
+- **Personal** (own tab): starts the personal-assistant agent in
   `~/pa`, shows what it found across mail, Mattermost, WhatsApp, calendar and
   deadlines, lets you edit and send its mail drafts through the running Emacs
   (Gnus) and nothing else, and hands tasks to a running agent or a new one in
   the right folder (`~/pa/configs/workspaces.yaml`). Findings and suggestions
   in the Cockpit can be silenced for hours, days or for good (ADR 0005).
-- **Fleet**: live roster per machine, status (busy, idle, waiting for you),
+- **Fleet**: a board of large cards, one per agent, titled by a small model
+  after what the agent is actually working on; opening one slides the session
+  in, the board folds into a side rail, and a chip bar or the arrow keys hop
+  between sessions. Per machine, status (busy, idle, waiting for you),
   model, login, thinking depth, context fill, last line. Sub-agents (Claude or
   Codex sessions started by another session) fold under their parent.
 - **Decisions**: permission prompts from Claude (and Codex, pi) answered from
@@ -41,6 +44,15 @@ What it reuses: [agentsview](https://www.agentsview.io/) for history and
 analytics; Claude Remote Control and Codex remote control for deep interaction
 from the phone; the harnesses' own hooks, sockets and state stores instead of
 wrapping any binary (ADR 0001).
+
+## Start agents inside tmux
+
+Claude Code and pi accept prompts from the dashboard wherever they run. Codex,
+opencode, Hermes and anything else can only be typed into, and slash commands
+(`/compact`) work only when typed, for every harness. `agentdash install
+launcher` installs `agent-tmux`; `alias codex='agent-tmux codex'` (same for
+`claude`, `pi`) gives every new agent its own tmux session, which also makes
+its terminal available in the dashboard.
 
 ## Layout
 

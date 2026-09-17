@@ -87,6 +87,7 @@ async def start_background(
     resume: str = "",
     permission_mode: str = "",
     config_dir: str | None = None,
+    model: str = "",
 ) -> dict[str, Any]:
     path = Path(cwd).expanduser()
     if not path.is_dir():
@@ -98,6 +99,8 @@ async def start_background(
         args += ["--resume", resume]
     if permission_mode:
         args += ["--permission-mode", permission_mode]
+    if model:
+        args += ["--model", model]
     if prompt:
         args.append(prompt)
     elif not resume:

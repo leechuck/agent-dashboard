@@ -87,6 +87,7 @@ async def nodes_ws(ws: WebSocket) -> None:
                 continue
             if frame.type == NODE_SESSIONS:
                 sessions = [Session.model_validate(s) for s in p.get("sessions", [])]
+                state.titler.apply(sessions)
                 previous = {
                     s.key: s.status for s in await state.db.list_sessions(machine=link.machine)
                 }

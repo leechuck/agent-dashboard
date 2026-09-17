@@ -1,10 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { Fleet, fleet } from '../lib/store.svelte'
-  import { ago } from '../lib/format'
+  import { ago, displayName } from '../lib/format'
   import { api } from '../lib/api'
   import DecisionCard from './DecisionCard.svelte'
-  import PersonalBriefing from './PersonalBriefing.svelte'
   import type { Finding, Session, Suggestion } from '../lib/types'
 
   const c = $derived(fleet.cockpit)
@@ -82,7 +81,7 @@
   }
 
   onMount(() => {
-    fleet.loadCockpit(true)
+    fleet.loadCockpit()
     const t = setInterval(() => fleet.loadCockpit(false), 20000)
     return () => clearInterval(t)
   })
@@ -148,7 +147,7 @@
       /* clipboard unavailable */
     }
   }
-  const sessionName = (key: string) => fleet.sessions[key]?.name || key.split(':').pop()?.slice(0, 8) || ''
+  const sessionName = (key: string) => displayName(fleet.sessions[key], key)
 </script>
 
 {#snippet quiet(id: string, title: string)}
@@ -228,16 +227,16 @@
 
     <section class="brief">
       <div class="bhead">
-        <h2>Briefing</h2>
+        <h2>Advice</h2>
         {#if c.generating}
           <span class="small muted">thinking…</span>
         {:else if b}
           <span class="small muted">{ago(b.generated_at)} ago{c.outdated ? ', fleet changed since' : ''}</span>
         {/if}
-        <button class="refresh" disabled={c.generating} onclick={() => fleet.refreshBriefing()}>{b ? 'Refresh' : 'Generate'}</button>
+        <button class="refresh" disabled={c.generating} onclick={() => fleet.refreshBriefing()}>{b ? 'Ask again' : 'Ask for advice'}</button>
       </div>
       {#if c.error && !c.generating}
-        <p class="small err">No briefing: {c.error}</p>
+        <p class="small err">No advice: {c.error}</p>
       {/if}
       {#if b}
         <p class="summary" class:stale={c.outdated}>{b.summary}</p>
@@ -289,7 +288,7 @@
               <li>
                 <a href={sessionHref(x.key)} {target}>
                   <span class={`dot ${x.s.status}`}></span>
-                  <span class="dn">{x.s.name || x.s.session_id.slice(0, 8)}</span>
+                  <span class="dn">{displayName(x.s)}</span>
                   <span class="dm muted">{x.s.machine} · {x.s.harness}{typeof x.s.extra?.context_pct === 'number' ? ` · ctx ${x.s.extra.context_pct.toFixed(0)}%` : ''}</span>
                   <span class="dt">{x.text}</span>
                 </a>
@@ -299,11 +298,9 @@
         {/if}
         <p class="small muted meta">{b.model} via {b.via}{typeof b.cost_usd === 'number' ? `, $${b.cost_usd.toFixed(3)}` : ''}. Nothing is sent until you press Send.</p>
       {:else if !c.generating && !c.error}
-        <p class="small muted">A model reads the roster, limits and last outputs and proposes what to do next. Nothing is sent to any session.</p>
+        <p class="small muted">Press the button and a model reads the roster, limits and last outputs and proposes what to do next. It runs only when you ask; which agent it uses is set under Settings.</p>
       {/if}
     </section>
-
-    <PersonalBriefing {wide} />
 
     {#if info.length}
       <h2>Notes</h2>

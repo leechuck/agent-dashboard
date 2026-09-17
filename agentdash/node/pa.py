@@ -180,7 +180,9 @@ class PersonalAssistant:
         return {"ok": True, "status": status}
 
     # ---- running the agent -------------------------------------------
-    async def run(self, sessions: dict[str, Session], focus: str = "") -> dict[str, Any]:
+    async def run(
+        self, sessions: dict[str, Session], focus: str = "", agent: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         if not self.available:
             return {"ok": False, "error": "no pa"}
         sess = self._session(sessions)
@@ -189,8 +191,15 @@ class PersonalAssistant:
         prompt = resources.files("agentdash.node").joinpath("pa_prompt.md").read_text()
         if focus.strip():
             prompt += f"\n\nRobert's note for this run: {focus.strip()[:1000]}\n"
+        agent = agent or {}
+        known = {d.name: d for d in self.s.claude_config_dirs}
+        config_dir = known.get(str(agent.get("login") or "")) or self.s.claude_config_dirs[0]
         r = await start_background(
-            str(self.dir), prompt, name=SESSION_NAME, config_dir=str(self.s.claude_config_dirs[0])
+            str(self.dir),
+            prompt,
+            name=SESSION_NAME,
+            config_dir=str(config_dir),
+            model=str(agent.get("model") or ""),
         )
         return {"ok": bool(r.get("ok")), "error": "" if r.get("ok") else r.get("output", "failed")}
 
@@ -306,7 +315,7 @@ class PersonalAssistant:
             if not self.available:
                 return {"ok": False, "error": "no pa"}
             if op == "run":
-                return await self.run(sessions, str(p.get("focus") or ""))
+                return await self.run(sessions, str(p.get("focus") or ""), p.get("agent"))
             if op == "send_email":
                 body = p.get("body")
                 return await self.send_email(

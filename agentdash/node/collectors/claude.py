@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from ...models import Harness, Session, SessionStatus, now_ms
-from ..adapters.claude_transcript import tail_facts
+from ..adapters.claude_transcript import first_request, tail_facts
 
 log = logging.getLogger(__name__)
 
@@ -91,6 +91,8 @@ def _describe(extra: dict[str, Any], facts: dict[str, Any], sid: str, state_dir:
     """
     if facts.get("last_user"):
         extra["last_user"] = facts["last_user"]
+    if facts.get("first_user"):
+        extra["first_user"] = facts["first_user"]
     if facts.get("effort"):
         extra["effort"] = facts["effort"]
     tokens = int(facts.get("context_tokens") or 0)
@@ -124,6 +126,7 @@ class ClaudeCollector:
         self.state_dir = state_dir or Path.home() / ".agentdash"
         self.config_dirs = [d for d in config_dirs if d.exists()]
         self._transcripts: dict[str, Path] = {}
+        self._asked: dict[str, dict[str, str]] = {}  # session id -> first and last request
 
     async def _agents_json(self, config_dir: Path) -> list[dict[str, Any]]:
         env = dict(os.environ, CLAUDE_CONFIG_DIR=str(config_dir))
@@ -161,6 +164,20 @@ class ClaudeCollector:
                 out[int(rec["pid"])] = rec
         return out
 
+    def _requests(self, sid: str, tpath: Path | None, facts: dict[str, Any]) -> None:
+        """Remember what the user asked: a long tool-heavy turn pushes it out of the tail."""
+        if not tpath:
+            return
+        seen = self._asked.setdefault(sid, {})
+        if "first" not in seen:
+            seen["first"] = first_request(tpath)
+        if facts.get("last_user"):
+            seen["last"] = facts["last_user"]
+        elif "last" not in seen:  # once per session: look much further back
+            seen["last"] = tail_facts(tpath, 6_000_000)["last_user"] or seen["first"]
+        facts["last_user"] = seen["last"]
+        facts["first_user"] = seen["first"]
+
     async def collect(self) -> list[Session]:
         sessions: list[Session] = []
         for config_dir in self.config_dirs:
@@ -197,6 +214,7 @@ class ClaudeCollector:
                     extra["socket"] = reg.get("messagingSocketPath", "")
                     extra["version"] = reg.get("version", "")
                 facts = tail_facts(tpath) if tpath else {}
+                self._requests(sid, tpath, facts)
                 _describe(extra, facts, sid, self.state_dir)
                 sessions.append(
                     Session(
@@ -235,6 +253,7 @@ class ClaudeCollector:
                 }
                 if acct["account"]:
                     extra["account"] = acct["account"]
+                self._requests(sid, tpath, facts)
                 _describe(extra, facts, sid, self.state_dir)
                 sessions.append(
                     Session(

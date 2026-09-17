@@ -44,6 +44,7 @@ class CodexCollector:
         self.machine = machine
         self.home = codex_home or Path.home() / ".codex"
         self.state_db = self.home / "state_5.sqlite"
+        self._last_user: dict[str, str] = {}
 
     _COLS = (
         "id, rollout_path, cwd, title, name, updated_at_ms, created_at_ms, model, "
@@ -139,10 +140,17 @@ class CodexCollector:
             )
             extra: dict = {"codex_home": str(self.home)}
             if info.get("last_user"):
-                extra["last_user"] = info["last_user"]
+                self._last_user[t["id"]] = info["last_user"]
+            if self._last_user.get(t["id"]):
+                extra["last_user"] = self._last_user[t["id"]]
+            if t.get("first_user_message"):
+                extra["first_user"] = " ".join(str(t["first_user_message"]).split())[:300]
             effort = info.get("effort") or t.get("reasoning_effort")
             if effort:
                 extra["effort"] = str(effort)
+            if info.get("goal"):
+                extra["goal"] = info["goal"]
+                extra["goal_tokens"] = info.get("goal_tokens", 0)
             if spawn:
                 extra["parent"] = Session.make_key(self.machine, Harness.codex, spawn)
             if info.get("context_tokens") and info.get("context_window"):

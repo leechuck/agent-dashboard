@@ -1,4 +1,4 @@
-import type { BusEvent, Cockpit, Decision, PAState, Machine, Message, Session, UsageWindow } from './types'
+import type { AgentSettings, AgentSettingsView, BusEvent, Cockpit, Decision, PAState, Machine, Message, Session, UsageWindow } from './types'
 
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } })
@@ -48,11 +48,13 @@ export const api = {
       body: JSON.stringify({ older_than_hours: 48, keys }),
     }),
   dirs: (machine: string) => j<string[]>(`/api/machines/${encodeURIComponent(machine)}/dirs`),
-  cockpit: (brief = true) => j<Cockpit>(`/api/cockpit?brief=${brief}`),
+  cockpit: () => j<Cockpit>('/api/cockpit'),
   cockpitBrief: () => j<Pick<Cockpit, 'briefing' | 'outdated' | 'generating' | 'error'>>('/api/cockpit/brief', { method: 'POST', body: '{}' }),
   silence: (id: string, title: string, hours: number | null) =>
     j<{ ok: boolean }>('/api/cockpit/silence', { method: 'POST', body: JSON.stringify({ id, title, hours }) }),
   unsilence: (id: string) => j<{ ok: boolean }>(`/api/cockpit/silence/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  agentSettings: () => j<AgentSettingsView>('/api/settings/agents'),
+  saveAgentSettings: (agents: AgentSettings) => j<{ ok: boolean; agents: AgentSettings }>('/api/settings/agents', { method: 'PUT', body: JSON.stringify(agents) }),
   pa: () => j<PAState>('/api/pa'),
   paRun: (focus = '') => j<{ ok: boolean; error?: string; already_running?: boolean }>('/api/pa/run', { method: 'POST', body: JSON.stringify({ focus }) }),
   paItem: (id: string, op: 'send_email' | 'discard' | 'mark', extra: { body?: string | null; status?: string; note?: string } = {}) =>

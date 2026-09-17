@@ -7,14 +7,15 @@
 </script>
 
 <header>
-  <a class="brand" href="#/">agentdash</a>
+  <a class="brand" href="#/" title="All agents"><span class="full">agentdash</span><span class="short">▦</span></a>
   <span class="link" class:live={fleet.connected} title={fleet.connected ? 'live updates on' : 'reconnecting'}></span>
   <nav>
-    <a href="#/cockpit" class:hot={needs > 0}>Cockpit{needs > 0 ? ` ${needs}` : ''}</a>
+    <a href="#/overview" class:hot={needs > 0}>Overview{needs > 0 ? ` ${needs}` : ''}</a>
+    <a href="#/personal">Personal</a>
     <a href="#/decisions" class:hot={pending > 0}>Decisions{pending > 0 ? ` ${pending}` : ''}</a>
     <a href="#/limits" class:warn={!!worst && worst.used_pct >= 80} title={worst ? `${worst.provider} ${worst.label}` : ''}>Limits{worst ? ` ${worst.used_pct.toFixed(0)}%` : ''}</a>
     <a href="#/history">History</a>
-    <a href="#/settings">Settings</a>
+    <a href="#/settings" title="Settings" aria-label="Settings">⚙</a>
   </nav>
   {#if pending === 0 && waiting > 0}
     <span class="count">{waiting} waiting</span>
@@ -43,9 +44,11 @@
   .link.live { background: var(--moss); }
   nav { margin-left: auto; display: flex; gap: 14px; font-size: 14px; flex: none; }
   .sr { display: none; }
+  .brand .short { display: none; }
   @media (max-width: 480px) {
     header { gap: 10px; padding: 0 12px; }
-    .brand { font-size: 14px; }
+    .brand .full { display: none; }
+    .brand .short { display: inline; font-size: 18px; }
     nav { gap: 10px; font-size: 13px; }
     .count { display: none; }
   }

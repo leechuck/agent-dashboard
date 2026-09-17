@@ -51,13 +51,31 @@ def create_app() -> FastAPI:
                     await db.prune_usage(settings.keep_usage_days * 86400 * 1000)
                     await db.prune_events(settings.keep_events_days * 86400 * 1000)
                     await db.prune_decisions(settings.keep_events_days * 86400 * 1000)
+                    await db.prune_titles(30 * 86400 * 1000)
                 except Exception:  # noqa: BLE001
                     logging.getLogger(__name__).exception("retention failed")
                 await asyncio.sleep(6 * 3600)
 
+        async def titles() -> None:
+            from .cockpit import agent_settings
+
+            hub = app.state.hub
+            await hub.titler.load(db)
+            while True:
+                await asyncio.sleep(60)
+                try:
+                    agents = agent_settings(
+                        await db.get_setting("agents"), settings.cockpit_node, settings.pa_node
+                    )
+                    await hub.titler.tick(hub, agents)
+                except Exception:  # noqa: BLE001
+                    logging.getLogger(__name__).exception("titling failed")
+
         task = asyncio.create_task(retention())
+        title_task = asyncio.create_task(titles())
         yield
         task.cancel()
+        title_task.cancel()
         await app.state.history_client.aclose()
         await db.close()
 

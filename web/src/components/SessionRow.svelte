@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Session } from '../lib/types'
-  import { ago, backendLabel, contextOf, modelLabel, shortCwd, statusLabel } from '../lib/format'
+  import { ago, backendLabel, displayName, contextOf, modelLabel, shortCwd, statusLabel } from '../lib/format'
   let { session, selected, child = false }: { session: Session; selected: boolean; child?: boolean } = $props()
   const s = $derived(session)
   const x = $derived((s.extra ?? {}) as Record<string, any>)
@@ -12,11 +12,11 @@
 <li class={`row ${s.status}`} class:selected class:child>
   <a href={`#/session/${encodeURIComponent(s.key)}`}>
     <div class="top">
-      <span class="name">{s.name || s.session_id.slice(0, 8)}</span>
+      <span class="name">{displayName(s)}</span>
       <span class="harness">{backendLabel(s)}{x.tmux && s.harness !== 'tmux' ? ' · tmux' : ''}</span>
       <span class="age muted">{ago(s.updated_at)}</span>
     </div>
-    {#if !child}<div class="mid muted small">{shortCwd(s.cwd)}</div>{/if}
+    {#if !child}<div class="mid muted small">{x.title && s.name ? `${s.name} · ` : ''}{shortCwd(s.cwd)}</div>{/if}
     {#if model || x.effort || ctx}
       <div class="facts small">
         {#if model}<span class="fact" title="model">{model}{x.fast_mode ? ' · fast' : ''}</span>{/if}
@@ -28,7 +28,7 @@
         {/if}
       </div>
     {/if}
-    <div class="state small" class:stale>{stale ? `stale · ${statusLabel(s.status, s.waiting_for)} since ${ago(s.updated_at)}` : statusLabel(s.status, s.waiting_for)}</div>
+    <div class="state small" class:stale>{stale ? `stale · ${statusLabel(s.status, s.waiting_for, !!x.goal)} since ${ago(s.updated_at)}` : statusLabel(s.status, s.waiting_for, !!x.goal)}</div>
     {#if s.last_line}
       <div class="last small">{s.last_line}</div>
     {/if}
@@ -44,8 +44,8 @@
   a { display: block; padding: 10px 16px 12px 13px; color: inherit; text-decoration: none; }
   a:hover { background: var(--page); text-decoration: none; }
   .top { display: flex; gap: 8px; align-items: baseline; }
-  .name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .harness { color: var(--muted); font-size: 13px; }
+  .name { font-weight: 600; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .harness { color: var(--muted); font-size: 13px; flex: 0 1 auto; min-width: 0; max-width: 36%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .age { margin-left: auto; font-size: 13px; white-space: nowrap; flex: none; }
   .facts { display: flex; flex-wrap: wrap; gap: 3px 10px; margin-top: 3px; color: var(--muted); font-size: 12px; }
   .fact { white-space: nowrap; }

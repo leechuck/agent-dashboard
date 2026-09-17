@@ -454,7 +454,9 @@ class Node:
         )
 
     async def cockpit_brief(self, p: dict[str, Any]) -> None:
-        result = await briefing.brief(self.s, p.get("system", ""), p.get("digest") or {})
+        result = await briefing.brief(
+            self.s, p.get("system", ""), p.get("digest") or {}, p.get("agent")
+        )
         await self.hub.send(
             NODE_EVENT, {"kind": "brief.result", "request_id": p.get("request_id", ""), **result}
         )

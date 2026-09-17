@@ -49,3 +49,15 @@ spend tokens while nobody looks.
   `openai` provider about 2 US cents.
 - Money (OpenRouter credit) is reported to the model in dollars, never as a
   percentage, because "82 % used" of a large balance is not a warning.
+
+## Amendment, 2026-09-17 (later the same day)
+
+- The page is called Overview and the model part Advice; the code keeps `cockpit`.
+- Advice is generated only when the owner presses the button. The timed refresh is gone.
+- The agent is chosen on the Settings page and stored on the hub (`settings` table, key
+  `agents`): harness `claude` (headless `claude -p`), `codex` (`codex exec --ephemeral
+  -s read-only`) or `api`, plus model, thinking effort, machine and Claude login. The
+  node's `.env` values are only defaults.
+- The same call path names sessions (`Titler`): one small request (default Haiku) when a
+  session is new or was asked something new, at most every 15 minutes, switchable off.
+  Titles are stored on the hub and merged into the roster as `extra.title`.

@@ -237,25 +237,20 @@ async def _cockpit_inputs(st: HubState):
     return sessions, machines, usage, findings, silenced
 
 
-@router.get("/cockpit")
-async def cockpit(request: Request, brief: bool = True):
-    """Findings from the rules, plus the cached model briefing.
+async def _agents(request: Request) -> dict:
+    s = request.app.state.settings
+    stored = await _state(request).db.get_setting("agents")
+    return ck.agent_settings(stored, s.cockpit_node, s.pa_node)
 
-    With brief=true a stale briefing is refreshed in the background (rate limited),
-    so opening the page is what spends model tokens, not the hub idling.
-    """
+
+@router.get("/cockpit")
+async def cockpit(request: Request):
+    """Findings from the rules plus the last advice. Reading never spends model tokens."""
     st = _state(request)
     sessions, machines, usage, findings, silenced = await _cockpit_inputs(st)
     stats = ck.stats(sessions, machines)
     d = ck.digest(sessions, machines, usage, findings)
     d["silenced_by_owner"] = [x["title"] for x in silenced]
-    st.briefer.min_interval = request.app.state.settings.cockpit_min_interval
-    st.briefer.preferred = request.app.state.settings.cockpit_node
-    if brief and st.nodes:
-        task = asyncio.create_task(st.briefer.refresh(st, d))
-        request.app.state.bg_tasks = getattr(request.app.state, "bg_tasks", set())
-        request.app.state.bg_tasks.add(task)
-        task.add_done_callback(request.app.state.bg_tasks.discard)
     return {
         "headline": ck.headline(findings, stats),
         "stats": stats,
@@ -309,16 +304,58 @@ async def cockpit_brief(request: Request):
     sessions, machines, usage, findings, silenced = await _cockpit_inputs(st)
     d = ck.digest(sessions, machines, usage, findings)
     d["silenced_by_owner"] = [x["title"] for x in silenced]
-    st.briefer.preferred = request.app.state.settings.cockpit_node
-    await st.briefer.refresh(st, d, force=True)
+    await st.briefer.refresh(st, d, (await _agents(request))["advice"])
     return _quiet_view(st.briefer.view(ck.fingerprint(d)), silenced)
+
+
+class AgentsBody(BaseModel):
+    advice: dict = {}
+    personal: dict = {}
+    titles: dict = {}
+
+
+_AGENT_FIELDS = {
+    "advice": {"machine", "harness", "model", "login", "effort"},
+    "personal": {"machine", "model", "login"},
+    "titles": {"enabled", "model"},
+}
+
+
+@router.get("/settings/agents")
+async def get_agents(request: Request):
+    """Which agent the dashboard itself uses, and the choices that exist on the fleet."""
+    st = _state(request)
+    logins = {}
+    for w in await st.db.latest_usage():
+        d = str(w.detail.get("config_dir") or "")
+        if w.provider == "anthropic" and d:
+            logins[d] = w.account
+    return {
+        "agents": await _agents(request),
+        "machines": sorted(st.nodes),
+        "logins": [{"dir": d, "account": a} for d, a in sorted(logins.items())],
+    }
+
+
+@router.put("/settings/agents")
+async def put_agents(body: AgentsBody, request: Request):
+    clean = {
+        section: {k: v for k, v in getattr(body, section).items() if k in fields}
+        for section, fields in _AGENT_FIELDS.items()
+    }
+    if clean["advice"].get("harness") not in (None, "claude", "codex", "api"):
+        raise HTTPException(400, "unknown harness")
+    await _state(request).db.set_setting("agents", clean)
+    return {"ok": True, "agents": await _agents(request)}
 
 
 async def _pa(request: Request, payload: dict, timeout: float = 120) -> dict:
     """Relay to the node that holds the personal-assistant repo. Nothing is stored here."""
     st = _state(request)
-    s = request.app.state.settings
-    prefer = s.pa_node or s.cockpit_node
+    agents = await _agents(request)
+    prefer = agents["personal"]["machine"]
+    if payload.get("op") == "run":
+        payload = {**payload, "agent": agents["personal"]}
     order = sorted(st.nodes, key=lambda m: (m != prefer, m))
     if not order:
         raise HTTPException(503, "no machine is online")

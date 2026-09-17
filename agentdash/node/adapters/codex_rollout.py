@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
@@ -114,6 +115,11 @@ def iter_messages(lines: Iterator[str]) -> Iterator[Message]:
         yield from parse_record(rec)
 
 
+_GOAL_TAG = '<codex_internal_context source="goal">'
+_OBJECTIVE = re.compile(r"<objective>(.*?)</objective>", re.S)
+_TOKENS_USED = re.compile(r"Tokens used: (\d+)")
+
+
 def scan_status(lines: Iterator[str]) -> dict[str, Any]:
     """Return {cwd, busy, last_agent_message, last_user, context_*, last_ts} from a rollout tail."""
     info: dict[str, Any] = {
@@ -125,6 +131,8 @@ def scan_status(lines: Iterator[str]) -> dict[str, Any]:
         "context_window": 0,
         "effort": "",
         "model": "",
+        "goal": "",
+        "goal_tokens": 0,
         "last_ts": None,
     }
     for line in lines:
@@ -151,6 +159,24 @@ def scan_status(lines: Iterator[str]) -> dict[str, Any]:
                 last = p["info"].get("last_token_usage") or {}
                 info["context_tokens"] = int(last.get("total_tokens") or 0)
                 info["context_window"] = int(p["info"].get("model_context_window") or 0)
+            elif et == "thread_goal_updated" and isinstance(p.get("goal"), dict):
+                g = p["goal"]
+                active = g.get("status") == "active"
+                info["goal"] = (
+                    " ".join(str(g.get("objective") or "").split())[:400] if active else ""
+                )
+                info["goal_tokens"] = int(g.get("tokensUsed") or 0) if active else 0
+        elif t == "response_item" and p.get("type") == "message":
+            text = _texts(p.get("content"))
+            if p.get("role") == "assistant" and text.strip():
+                # commentary between tool calls is the freshest sign of what it is doing
+                info["last_agent_message"] = text
+            elif p.get("role") == "user" and text.lstrip().startswith(_GOAL_TAG):
+                m = _OBJECTIVE.search(text)
+                if m:
+                    info["goal"] = " ".join(m.group(1).split())[:400]
+                used = _TOKENS_USED.search(text)
+                info["goal_tokens"] = int(used.group(1)) if used else info["goal_tokens"]
         elif t == "turn_context":
             info["cwd"] = p.get("cwd") or info["cwd"]
             info["effort"] = str(p.get("effort") or info["effort"])

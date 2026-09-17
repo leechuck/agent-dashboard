@@ -246,6 +246,29 @@ def tail_facts(path: Path, max_bytes: int = 200_000) -> dict[str, Any]:
     return facts
 
 
+_NOT_A_REQUEST = (
+    "<local-command",
+    "<command-",
+    "<task-notification",
+    "This session is being continued",
+)
+
+
+def first_request(path: Path, max_bytes: int = 400_000) -> str:
+    """The first thing the user asked for: what the session was started to do."""
+    try:
+        with path.open("rb") as f:
+            data = f.read(max_bytes)
+    except OSError:
+        return ""
+    lines = (line.decode("utf-8", "replace") for line in data.split(b"\n")[:-1])
+    for m in iter_messages(lines):
+        if m.kind == "text" and m.role == "user" and not m.is_meta and not m.agent_id:
+            if not m.text.lstrip().startswith(_NOT_A_REQUEST):
+                return " ".join(m.text.split())[:300]
+    return ""
+
+
 def last_line_preview(path: Path, max_bytes: int = 200_000) -> str:
     """Cheap preview: last assistant text or user prompt in the tail of the file."""
     return tail_facts(path, max_bytes)["last_line"]

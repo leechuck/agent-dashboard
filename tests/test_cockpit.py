@@ -256,3 +256,104 @@ def test_install_account_shares_transcripts_and_is_idempotent(tmp_path):
     assert (team / "settings.json").read_text() == '{"hooks": {}}'
     assert "CLAUDE_CONFIG_DIR" in (tmp_path / "bin" / "claude-team").read_text() and first
     assert install_account("team", tmp_path, tmp_path / "bin") == []
+
+
+def test_codex_goal_mode_and_fresh_last_line():
+    import json
+
+    from agentdash.node.adapters.codex_rollout import scan_status
+
+    def rec(t, payload):
+        return json.dumps({"timestamp": "2026-09-17T06:00:00Z", "type": t, "payload": payload})
+
+    goal = '<codex_internal_context source="goal">\nContinue.\n<objective>\nShip the\nbenchmark\n</objective>\nBudget:\n- Tokens used: 2667056\n'
+    lines = [
+        rec("event_msg", {"type": "task_complete", "last_agent_message": "old summary"}),
+        rec("event_msg", {"type": "task_started"}),
+        rec(
+            "response_item",
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": goal}]},
+        ),
+        rec(
+            "response_item",
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Checking the queue again."}],
+            },
+        ),
+    ]
+    info = scan_status(iter(lines))
+    assert info["busy"] and info["last_agent_message"] == "Checking the queue again."
+    assert (
+        info["goal"] == "Ship the benchmark"
+        and info["goal_tokens"] == 2667056
+        and info["last_user"] == ""
+    )
+    done = rec(
+        "event_msg",
+        {"type": "thread_goal_updated", "goal": {"status": "complete", "objective": "x"}},
+    )
+    assert scan_status(iter([*lines, done]))["goal"] == ""
+
+
+def test_agent_settings_merge_and_title_parsing():
+    a = ck.agent_settings(
+        {"advice": {"harness": "codex", "model": ""}, "titles": {"enabled": False}}, "lap", ""
+    )
+    assert a["advice"]["harness"] == "codex" and a["advice"]["machine"] == "lap"
+    assert a["personal"]["machine"] == "lap" and a["titles"] == {"enabled": False, "model": "haiku"}
+    got = ck.parse_titles(
+        '```json\n{"titles": {"k1": "\\"Revise ecology paper section 3.\\"", "zz": "x", "k2": ""}}\n```',
+        {"k1", "k2"},
+    )
+    assert got == {"k1": "Revise ecology paper section 3"}
+
+
+async def test_titler_renames_only_when_the_request_changes():
+    class DB:
+        def __init__(self, sessions):
+            self.sessions, self.saved = sessions, {}
+
+        async def titles(self):
+            return {}
+
+        async def list_sessions(self, active_only=False):
+            return self.sessions
+
+        async def set_title(self, key, title, basis):
+            self.saved[key] = title
+
+    class State:
+        def __init__(self, db):
+            self.db, self.nodes, self.calls = db, {"m1": object()}, []
+
+        async def request(self, link, type_, payload, timeout=0):
+            self.calls.append(payload)
+            keys = [s["key"] for s in payload["digest"]["sessions"]]
+            return {
+                "ok": True,
+                "text": '{"titles": {'
+                + ",".join(f'"{k}": "Title for {k[-1]}"' for k in keys)
+                + "}}",
+            }
+
+    a = sess("a", "busy", first_user="fix the parser", last_user="status?")
+    kid = sess("k", "busy", parent=a.key, first_user="sub work")
+    blank = sess("b", "idle")
+    state = State(DB([a, kid, blank]))
+    titler, agents = ck.Titler(), ck.agent_settings({}, "m1")
+    assert await titler.tick(state, agents) == 1
+    assert (
+        state.calls[0]["agent"]["model"] == "haiku"
+        and len(state.calls[0]["digest"]["sessions"]) == 1
+    )
+    fresh = [sess("a", "busy", first_user="fix the parser", last_user="status?")]
+    titler.apply(fresh)
+    assert fresh[0].extra["title"] == "Title for a"
+    assert await titler.tick(state, agents) == 0 and len(state.calls) == 1  # nothing changed
+    a.extra["last_user"] = "now write the paper"
+    assert await titler.tick(state, agents) == 0  # changed, but renaming waits out the gap
+    titler.last_run = 0
+    assert await titler.tick(state, agents) == 1 and len(state.calls) == 2
+    assert await titler.tick(state, ck.agent_settings({"titles": {"enabled": False}})) == 0

@@ -1,11 +1,13 @@
 <script lang="ts">
   import { fleet } from '../lib/store.svelte'
   import SessionRow from './SessionRow.svelte'
+  import SessionCard from './SessionCard.svelte'
   import MachineHeader from './MachineHeader.svelte'
   import AttentionStrip from './AttentionStrip.svelte'
   import type { Session } from '../lib/types'
 
-  let { selected, cockpitCard = false }: { selected: string | undefined; cockpitCard?: boolean } = $props()
+  // board: large cards filling the page (home); rail: compact rows beside an open page
+  let { selected, cockpitCard = false, layout = 'rail' }: { selected: string | undefined; cockpitCard?: boolean; layout?: 'board' | 'rail' } = $props()
   const ck = $derived(fleet.cockpit)
   const ckActs = $derived(ck?.findings.filter((f) => f.severity === 'act').length ?? 0)
   const ckWarns = $derived(ck?.findings.filter((f) => f.severity === 'warn').length ?? 0)
@@ -58,10 +60,10 @@
 </script>
 
 {#if cockpitCard && ck}
-  <a class="ck" class:hot={ckActs > 0} class:calm={ckActs === 0 && ckWarns === 0} href="#/cockpit">
+  <a class="ck" class:hot={ckActs > 0} class:calm={ckActs === 0 && ckWarns === 0} href="#/overview">
     <span class="ckh">{ck.headline.split('. ')[0]}</span>
-    <span class="cks small muted">{ck.stats.busy} working · {ck.stats.idle} idle{ck.briefing ? ' · briefing ready' : ''}</span>
-    <span class="ckgo">Cockpit ›</span>
+    <span class="cks small muted">{ck.stats.busy} working · {ck.stats.idle} idle</span>
+    <span class="ckgo">Overview ›</span>
   </a>
 {/if}
 <AttentionStrip />
@@ -76,6 +78,12 @@
   <MachineHeader id={g.machine} count={g.sessions.length} subagents={Object.values(g.kids).reduce((n, k) => n + k.length, 0)} />
   {#if g.sessions.length === 0}
     <p class="empty muted">Nothing running here.</p>
+  {:else if layout === 'board'}
+    <div class="board">
+      {#each g.sessions as s (s.key)}
+        <SessionCard session={s} kids={g.kids[s.key] ?? []} selected={s.key === selected} />
+      {/each}
+    </div>
   {:else}
     <ul>
       {#each g.sessions as s (s.key)}
@@ -142,6 +150,7 @@
   .tw { width: 10px; color: var(--muted); }
   .blocked { color: var(--signal); font-weight: 500; }
   .kids ul { background: var(--page); }
+  .board { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 12px; padding: 12px 16px 16px; align-items: stretch; }
   .notice { padding: 16px; margin: 0; }
   .empty { padding: 10px 16px 14px; margin: 0; font-size: 13px; }
   .foot { padding: 16px; }

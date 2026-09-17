@@ -57,10 +57,10 @@ export class Fleet {
     }
   }
 
-  /** brief=true lets the hub refresh an outdated model briefing; false only reads. */
-  async loadCockpit(brief = true) {
+  /** Rules and the last advice. Never triggers a model call. */
+  async loadCockpit(_unused?: boolean) {
     try {
-      this.cockpit = await api.cockpit(brief)
+      this.cockpit = await api.cockpit()
     } catch {
       /* the page shows the last good state */
     }
