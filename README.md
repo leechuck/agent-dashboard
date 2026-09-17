@@ -52,7 +52,10 @@ opencode, Hermes and anything else can only be typed into, and slash commands
 (`/compact`) work only when typed, for every harness. `agentdash install
 launcher` installs `agent-tmux`; `alias codex='agent-tmux codex'` (same for
 `claude`, `pi`) gives every new agent its own tmux session, which also makes
-its terminal available in the dashboard.
+its terminal available in the dashboard. For Codex, the shell function in
+`agentdash/install/files/codex-tmux.bashrc` is the better wrapper: it sends only
+interactive runs into tmux and leaves `codex exec`, `app-server`, pipes and
+scripts alone.
 
 ## Layout
 
