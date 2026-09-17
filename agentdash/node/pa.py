@@ -22,6 +22,7 @@ import yaml
 from ..config import Settings
 from ..models import Session, now_ms
 from .adapters.claude_cli import start_background
+from .pa_panels import PanelError, Panels
 
 log = logging.getLogger(__name__)
 
@@ -91,6 +92,7 @@ class PersonalAssistant:
         self.dir = s.pa_dir.expanduser()
         self.file = self.dir / "data" / "dashboard_briefing.json"
         self.state_file = s.state_dir / "pa-state.json"
+        self.panels = Panels(self.dir)
         self._lock = asyncio.Lock()
 
     @property
@@ -142,7 +144,7 @@ class PersonalAssistant:
             pass
         except json.JSONDecodeError as e:
             return {"ok": False, "error": f"dashboard_briefing.json is not valid JSON: {e}"}
-        except PAError as e:
+        except (PAError, PanelError) as e:
             return {"ok": False, "error": str(e)}
         state = self._state()
         if briefing:
@@ -314,6 +316,10 @@ class PersonalAssistant:
                 return await asyncio.to_thread(self.get, sessions)
             if not self.available:
                 return {"ok": False, "error": "no pa"}
+            if op == "panel":
+                return await self.panels.panel(str(p.get("name")), bool(p.get("fresh")))
+            if op == "act":
+                return await self.panels.act(str(p.get("act")), p.get("args") or {})
             if op == "run":
                 return await self.run(sessions, str(p.get("focus") or ""), p.get("agent"))
             if op == "send_email":
@@ -326,5 +332,5 @@ class PersonalAssistant:
             if op == "mark":
                 return self.mark(str(p.get("id")), str(p.get("status")), str(p.get("note") or ""))
             return {"ok": False, "error": f"unknown op {op}"}
-        except PAError as e:
+        except (PAError, PanelError) as e:
             return {"ok": False, "error": str(e)}

@@ -1,4 +1,4 @@
-import type { AgentChoice, AgentSettings, Catalog, Endpoint, AgentSettingsView, BusEvent, Cockpit, Decision, PAState, Machine, Message, Session, UsageWindow } from './types'
+import type { AgentChoice, AgentSettings, Catalog, Endpoint, AgentSettingsView, BusEvent, Cockpit, Decision, PAActResult, PAState, Machine, Message, Session, UsageWindow } from './types'
 
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } })
@@ -67,6 +67,8 @@ export const api = {
   saveAgentSettings: (agents: AgentSettings) => j<{ ok: boolean; agents: AgentSettings }>('/api/settings/agents', { method: 'PUT', body: JSON.stringify(agents) }),
   pa: () => j<PAState>('/api/pa'),
   paRun: (focus = '') => j<{ ok: boolean; error?: string; already_running?: boolean }>('/api/pa/run', { method: 'POST', body: JSON.stringify({ focus }) }),
+  paPanel: <T>(name: string, fresh = false) => j<T>(`/api/pa/panel/${name}${fresh ? '?fresh=true' : ''}`),
+  paAct: (act: string, args: Record<string, unknown> = {}) => j<PAActResult>('/api/pa/act', { method: 'POST', body: JSON.stringify({ act, args }) }),
   paItem: (id: string, op: 'send_email' | 'discard' | 'mark', extra: { body?: string | null; status?: string; note?: string } = {}) =>
     j<{ ok: boolean; error?: string; status?: string }>('/api/pa/item', { method: 'POST', body: JSON.stringify({ id, op, ...extra }) }),
   usage: () => j<UsageWindow[]>('/api/usage'),

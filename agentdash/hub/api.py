@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -550,6 +552,30 @@ async def pa_item(body: PAItemBody, request: Request):
     if body.op not in ("send_email", "discard", "mark"):
         raise HTTPException(400, "unknown operation")
     return await _pa(request, body.model_dump(), timeout=200)
+
+
+_PA_NAME = re.compile(r"^[a-z][a-z_]{0,31}$")
+
+
+@router.get("/pa/panel/{name}")
+async def pa_panel(name: str, request: Request, fresh: bool = False):
+    """One panel of the Personal tab, computed on the node by a script in the PA repo."""
+    if not _PA_NAME.match(name):
+        raise HTTPException(400, "unknown panel")
+    return await _pa(request, {"op": "panel", "name": name, "fresh": fresh}, timeout=90)
+
+
+class PAActBody(BaseModel):
+    act: str
+    args: dict[str, Any] = {}
+
+
+@router.post("/pa/act")
+async def pa_act(body: PAActBody, request: Request):
+    """An edit from a panel (tick a todo, add a reminder). The node validates and runs it."""
+    if not _PA_NAME.match(body.act):
+        raise HTTPException(400, "unknown action")
+    return await _pa(request, {"op": "act", "act": body.act, "args": body.args}, timeout=330)
 
 
 @router.get("/usage")

@@ -14,6 +14,7 @@
   const terminalView = () => import('./components/Terminal.svelte')
   import Overview from './components/Overview.svelte'
   import PersonalBriefing from './components/PersonalBriefing.svelte'
+  import Personal from './components/Personal.svelte'
 
   let route = $state(parse(location.hash))
 
@@ -82,7 +83,7 @@
         {:else if route.key}
           <SessionView key={route.key} />
         {:else if route.page === 'personal'}
-          <PersonalBriefing wide />
+          <Personal wide />
         {:else if route.page === 'overview'}
           <Overview />
         {/if}
@@ -104,7 +105,7 @@
     {:else if route.page === 'overview'}
       <Overview />
     {:else if route.page === 'personal'}
-      <PersonalBriefing />
+      <Personal />
     {:else}
       <Fleet selected={undefined} cockpitCard layout="board" />
     {/if}

@@ -203,6 +203,40 @@ export interface PAState {
   roots: PAWorkspace[]
 }
 
+/** One open item of the todo lists kept in the PA repo (docs/pa-panels.md). */
+export interface PATodo {
+  id: string
+  list: string
+  date: string
+  status: string
+  title: string
+  body: string
+  snoozed_until: string
+  project: string
+  project_name: string
+  kind: string
+  bucket: 'overdue' | 'today' | 'week' | 'later' | 'snoozed' | 'closed'
+  days: number
+}
+
+export interface PATodoPanel {
+  ok: boolean
+  error?: string
+  today: string
+  items: PATodo[]
+  lists: string[]
+  counts: Record<string, number>
+  projects: { slug: string; name: string; kind: string }[]
+}
+
+export interface PAActResult {
+  ok: boolean
+  error?: string
+  warning?: string
+  output?: string
+  [k: string]: unknown
+}
+
 export interface AgentSettings {
   advice: { machine: string; harness: 'claude' | 'codex' | 'api'; model: string; login: string; endpoint: string; effort: string }
   personal: { machine: string; model: string; login: string }
