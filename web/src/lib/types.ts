@@ -320,3 +320,10 @@ export interface AgentChoice {
   effort: string
   permissions: string
 }
+
+export interface SlashCommand {
+  name: string
+  description: string
+  source: 'builtin' | 'user' | 'project' | 'plugin' | 'skill'
+  args: string
+}

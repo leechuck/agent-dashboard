@@ -474,3 +474,19 @@ async def test_a_terminal_prompt_on_an_unarmed_machine_pushes():
     assert (
         len(st.pusher.sent) == 3
     )  # armed goes to the phone as a decision; chatter is not a prompt
+
+
+def test_a_session_the_plan_will_not_serve_is_flagged_with_the_way_out():
+    blocked = sess("a", "idle")
+    blocked.model = "claude-fable-5-1"
+    blocked.last_line = "You're out of usage credits. Run /usage-credits to keep using Fable 5.1 or /model to switch"
+    fs = ck.analyse([blocked, sess("b", "busy")], M, [], [], now=NOW)
+    (f,) = [f for f in fs if f.kind == "blocked"]
+    assert (
+        f.severity == "act"
+        and "claude-fable-5-1" in f.title
+        and f.action.label == "Switch its model"
+    )
+    assert not [
+        x for x in ck.analyse([sess("b", "busy")], M, [], [], now=NOW) if x.kind == "blocked"
+    ]

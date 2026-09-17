@@ -102,7 +102,8 @@ def burn_rate(points: list[tuple[int, float]], now: int, lookback_ms: int = 2 * 
 
 
 def _is_money(w: UsageWindow) -> bool:
-    return w.provider == "openrouter"
+    """Dollars, not a window that resets: credits and prepaid balances."""
+    return w.provider == "openrouter" or w.window in ("credits", "extra_usage")
 
 
 def _accounts(usage: list[UsageWindow], provider: str) -> list[str]:
@@ -124,7 +125,7 @@ def provider_headroom(usage: list[UsageWindow]) -> list[dict[str, Any]]:
     """Worst subscription window per login, as percent used."""
     worst: dict[tuple[str, str], UsageWindow] = {}
     for w in usage:
-        if _is_money(w) or w.window == "extra_usage":
+        if _is_money(w):
             continue
         k = (w.provider, w.account)
         if k not in worst or w.used_pct > worst[k].used_pct:
@@ -151,8 +152,23 @@ def pick_account(usage: list[UsageWindow], provider: str, now: int) -> dict[str,
     rows = []
     for acct in _accounts(usage, provider):
         wins = [w for w in usage if w.provider == provider and w.account == acct]
-        week = next((w for w in wins if w.window.startswith(("seven_day", "secondary"))), None)
-        short = next((w for w in wins if w.window.startswith(("five_hour", "primary"))), None)
+        # the plan-wide weekly window, not a per-model one: that is what runs out
+        week = next(
+            (
+                w
+                for w in wins
+                if w.window in ("weekly", "seven_day") or w.window.startswith("secondary")
+            ),
+            None,
+        )
+        short = next(
+            (
+                w
+                for w in wins
+                if w.window in ("session", "five_hour") or w.window.startswith("primary")
+            ),
+            None,
+        )
         if week is None:
             week, short = short, None
         if week is None:
@@ -381,7 +397,27 @@ def analyse(
             )
         )
 
-    # 7. busy but silent: possibly stuck
+    # 7. blocked by the plan rather than by work (a model the seat may not use)
+    for s in live:
+        line = (s.last_line or "").lower()
+        if "out of usage credits" not in line and "usage limit reached" not in line:
+            continue
+        model = s.model.split("/")[-1] or "that model"
+        out.append(
+            Finding(
+                id=f"blocked:{s.key}",
+                severity="act",
+                kind="blocked",
+                title=f"{_name(s)} is blocked: {model} is not covered by this plan",
+                detail="It cannot go on until the model changes or credits are added. "
+                "Switch agent / model on the session keeps the conversation and restarts it.",
+                session_key=s.key,
+                machine=s.machine,
+                action=Action("open_session", "Switch its model", _session_href(s.key)),
+            )
+        )
+
+    # 8. busy but silent: possibly stuck
     for s in live:
         if s.status == "busy" and now - s.updated_at > 30 * 60000:
             out.append(
@@ -397,7 +433,7 @@ def analyse(
                 )
             )
 
-    # 8. several agents in one working directory
+    # 9. several agents in one working directory
     by_dir: dict[tuple[str, str], list[Session]] = {}
     for s in live:
         if s.cwd and s.harness != "tmux" and s.status == "busy" and not s.extra.get("parent"):
@@ -416,7 +452,7 @@ def analyse(
                 )
             )
 
-    # 9. sessions ready for the next instruction
+    # 10. sessions ready for the next instruction
     ready = [
         s
         for s in live
@@ -442,7 +478,7 @@ def analyse(
             )
         )
 
-    # 10. stale sessions to clear out
+    # 11. stale sessions to clear out
     for m in machines:
         stale = [
             s for s in sessions if s.machine == m.id and s.status in ACTIVE and is_stale(s, now)
@@ -462,7 +498,7 @@ def analyse(
                 )
             )
 
-    # 11. spare capacity
+    # 12. spare capacity
     if live and not any(s.status == "busy" for s in live) and headroom:
         h = min(headroom, key=lambda x: x["used_pct"])
         if h["used_pct"] < 50:
@@ -480,7 +516,7 @@ def analyse(
                 )
             )
 
-    # 12. several logins of one provider: which one should take new work
+    # 13. several logins of one provider: which one should take new work
     for provider in sorted({w.provider for w in usage if not _is_money(w)}):
         pick = pick_account(usage, provider, now)
         if not pick:

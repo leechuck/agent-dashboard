@@ -109,7 +109,9 @@ async def test_bad_input_never_reaches_a_script(repo, act, args):
 
 
 async def test_a_failing_script_reports_its_own_words(repo):
-    fake(repo, "todo.py", 'print(json.dumps({"ok": False, "error": "no item with id"})); sys.exit(1)')
+    fake(
+        repo, "todo.py", 'print(json.dumps({"ok": False, "error": "no item with id"})); sys.exit(1)'
+    )
     r = await Panels(repo).act("todo_done", {"id": "0123abcd"})
     assert r == {"ok": False, "error": "no item with id"}
     fake(repo, "todo.py", 'print("Traceback"); sys.exit(2)')

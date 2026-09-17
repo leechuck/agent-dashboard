@@ -1,5 +1,5 @@
 import { api, subscribe } from './api'
-import type { BusEvent, Catalog, Cockpit, Decision, Machine, Message, Session, UsageWindow } from './types'
+import type { BusEvent, Catalog, Cockpit, SlashCommand, Decision, Machine, Message, Session, UsageWindow } from './types'
 
 export class Fleet {
   machines = $state<Record<string, Machine>>({})
@@ -109,6 +109,23 @@ export class Fleet {
       if (this.cockpit) Object.assign(this.cockpit, r)
     } finally {
       await this.loadCockpit(false)
+    }
+  }
+
+  /** Slash commands per session, fetched once when a composer first sees a slash. */
+  commands = $state<Record<string, SlashCommand[]>>({})
+  private commandsInflight = new Set<string>()
+
+  async loadCommands(key: string) {
+    if (this.commands[key] || this.commandsInflight.has(key)) return
+    this.commandsInflight.add(key)
+    try {
+      const r = await api.commands(key)
+      if (r.ok) this.commands[key] = r.commands
+    } catch {
+      /* no completion then; typing still works */
+    } finally {
+      this.commandsInflight.delete(key)
     }
   }
 

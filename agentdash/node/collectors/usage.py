@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 import time
 from datetime import datetime
@@ -38,6 +39,114 @@ def _iso_ms(v: Any) -> int | None:
         return int(datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp() * 1000)
     except ValueError:
         return None
+
+
+_SLUG = re.compile(r"[^a-z0-9]+")
+
+
+def _scope_label(scope: Any) -> str:
+    """What a scoped limit covers: a model ("Fable"), a surface, or both."""
+    if not isinstance(scope, dict):
+        return ""
+    parts = []
+    for key in ("model", "surface"):
+        v = scope.get(key)
+        if isinstance(v, dict):
+            name = v.get("display_name") or v.get("id")
+            if name:
+                parts.append(str(name))
+        elif isinstance(v, str) and v:
+            parts.append(v)
+    return " · ".join(parts)
+
+
+def parse_claude_usage(data: dict[str, Any], account: str) -> list[UsageWindow]:
+    """Every limit the account has, not only the two everybody knows.
+
+    Newer Claude accounts report a `limits` list: a session window, a weekly window over
+    everything, and one weekly window per scope (a model such as Fable, or a surface).
+    Older ones only have the named blocks, which are read when the list is absent.
+    """
+    out: list[UsageWindow] = []
+    seen: set[str] = set()
+    for lim in data.get("limits") or []:
+        if not isinstance(lim, dict) or lim.get("percent") is None:
+            continue
+        group = str(lim.get("group") or lim.get("kind") or "other")
+        scope = _scope_label(lim.get("scope"))
+        window = f"{group}_{_SLUG.sub('-', scope.lower()).strip('-')}" if scope else group
+        if window in seen:
+            continue
+        seen.add(window)
+        label = {"session": "Session · 5 hours", "weekly": "Week · everything"}.get(group, group)
+        if scope:
+            label = f"{'Week' if group == 'weekly' else group.title()} · {scope}"
+        out.append(
+            UsageWindow(
+                provider="anthropic",
+                account=account,
+                window=window,
+                label=label,
+                used_pct=float(lim["percent"]),
+                resets_at=_iso_ms(lim.get("resets_at")),
+                source="oauth",
+                detail={
+                    "group": group,
+                    "scope": scope,
+                    "severity": str(lim.get("severity") or ""),
+                    # a scope nobody has touched yet is reported inactive; still worth showing
+                    "active": bool(lim.get("is_active")),
+                },
+            )
+        )
+    if not out:  # older account: the named blocks
+        labels = {
+            "five_hour": "Session · 5 hours",
+            "seven_day": "Week · everything",
+            "seven_day_opus": "Week · Opus",
+            "seven_day_sonnet": "Week · Sonnet",
+        }
+        for key, label in labels.items():
+            w = data.get(key)
+            if isinstance(w, dict) and w.get("utilization") is not None:
+                out.append(
+                    UsageWindow(
+                        provider="anthropic",
+                        account=account,
+                        window={"five_hour": "session", "seven_day": "weekly"}.get(key, key),
+                        label=label,
+                        used_pct=float(w["utilization"]),
+                        resets_at=_iso_ms(w.get("resets_at")),
+                        source="oauth",
+                        detail={"group": "session" if key == "five_hour" else "weekly"},
+                    )
+                )
+    # usage credits: money that covers what the plan's limits do not
+    spend = data.get("spend") or {}
+    extra = data.get("extra_usage") or {}
+    if spend.get("enabled") or extra.get("is_enabled"):
+        used = (spend.get("used") or {}).get("amount_minor")
+        exp = (spend.get("used") or {}).get("exponent", 2)
+        detail: dict[str, Any] = {"group": "credits"}
+        if used is not None:
+            detail["used_usd"] = float(used) / (10 ** int(exp or 2))
+        if spend.get("balance") is not None:
+            detail["remaining"] = spend["balance"]
+        if extra.get("monthly_limit") is not None:
+            detail["limit"] = extra["monthly_limit"]
+        out.append(
+            UsageWindow(
+                provider="anthropic",
+                account=account,
+                window="credits",
+                label="Usage credits",
+                used_pct=float(spend.get("percent") or extra.get("utilization") or 0),
+                resets_at=None,
+                source="oauth",
+                detail=detail,
+            )
+        )
+    return out
 
 
 class UsageCollector:
@@ -70,10 +179,10 @@ class UsageCollector:
         if now_ms() - int(data.get("_written", 0)) > 20 * 60 * 1000:
             return []
         out = []
-        for key, label in (
-            ("five_hour", "5 hours"),
-            ("seven_day", "7 days"),
-            ("spend_limit", "spend limit"),
+        for key, label, group in (
+            ("five_hour", "Session · 5 hours", "session"),
+            ("seven_day", "Week · everything", "weekly"),
+            ("spend_limit", "Usage credits", "credits"),
         ):
             w = data.get("rate_limits", {}).get(key)
             if w and w.get("used_percentage") is not None:
@@ -81,11 +190,12 @@ class UsageCollector:
                     UsageWindow(
                         provider="anthropic",
                         account=account,
-                        window=key,
+                        window={"five_hour": "session", "seven_day": "weekly"}.get(key, key),
                         label=label,
                         used_pct=float(w["used_percentage"]),
                         resets_at=_iso_ms(w.get("resets_at")),
                         source="statusline",
+                        detail={"group": group},
                     )
                 )
         return out
@@ -122,43 +232,7 @@ class UsageCollector:
         if r.status_code != 200:
             log.warning("claude usage: HTTP %s", r.status_code)
             return []
-        data = r.json()
-        out = []
-        labels = {
-            "five_hour": "5 hours",
-            "seven_day": "7 days",
-            "seven_day_opus": "7 days (Opus)",
-            "seven_day_sonnet": "7 days (Sonnet)",
-        }
-        for key, label in labels.items():
-            w = data.get(key)
-            if isinstance(w, dict) and w.get("utilization") is not None:
-                out.append(
-                    UsageWindow(
-                        provider="anthropic",
-                        account=account,
-                        window=key,
-                        label=label,
-                        used_pct=float(w["utilization"]),
-                        resets_at=_iso_ms(w.get("resets_at")),
-                        source="oauth",
-                    )
-                )
-        extra = data.get("extra_usage") or {}
-        if extra.get("is_enabled"):
-            out.append(
-                UsageWindow(
-                    provider="anthropic",
-                    account=account,
-                    window="extra_usage",
-                    label="extra usage (month)",
-                    used_pct=float(extra.get("utilization") or 0),
-                    resets_at=None,
-                    source="oauth",
-                    detail={"used": extra.get("used_credits"), "limit": extra.get("monthly_limit")},
-                )
-            )
-        return out
+        return parse_claude_usage(r.json(), account)
 
     async def claude(self) -> list[UsageWindow]:
         """One set of windows per subscription login; two config dirs on one login count once."""
@@ -169,9 +243,9 @@ class UsageCollector:
             if acct["provider"] != "anthropic" or not acct["account"] or acct["account"] in seen:
                 continue  # API-key or gateway dirs have no subscription windows
             seen.add(acct["account"])
-            wins = self._claude_from_statusline(d, acct["account"])
-            if not wins:
-                wins = await self._claude_from_api(d, acct["account"])
+            wins = await self._claude_from_api(d, acct["account"])
+            if not wins:  # rate limited or offline: the status line still knows the basics
+                wins = self._claude_from_statusline(d, acct["account"])
             for w in wins:
                 w.detail = {**w.detail, "config_dir": d.name, "plan": acct["plan"]}
             out += wins

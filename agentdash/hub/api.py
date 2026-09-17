@@ -340,6 +340,28 @@ async def _node_call(request: Request, machine: str, type_: str, payload: dict, 
         raise HTTPException(504, f"{machine} did not answer") from e
 
 
+@router.get("/sessions/{key}/commands")
+async def session_commands(key: str, request: Request):
+    """Slash commands this session accepts, for completion in the composer."""
+    st = _state(request)
+    s = await st.db.get_session(key)
+    if not s:
+        raise HTTPException(404, "unknown session")
+    cached = st.commands.get(key)
+    if cached:
+        return cached
+    r = await _node_call(
+        request,
+        key.split(":", 1)[0],
+        "commands.list",
+        {"session_key": key, "harness": s.harness, "cwd": s.cwd},
+        timeout=30,
+    )
+    if r.get("ok"):
+        st.commands[key] = r
+    return r
+
+
 @router.get("/catalog")
 async def catalog(request: Request, fresh: bool = False):
     """Per machine: installed harnesses, Claude logins, models, and which endpoints work there."""

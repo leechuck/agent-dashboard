@@ -36,7 +36,7 @@ from ..models import (
     SessionStatus,
     now_ms,
 )
-from . import briefing
+from . import briefing, commands
 from .adapters import codex_rollout, hermes_state, opencode_store, pi_session
 from .adapters.claude_cli import job_action, kill_process
 from .adapters.claude_socket import SocketSendError, send_user_message
@@ -127,6 +127,8 @@ class Node:
             await self.session_action(p)
         elif frame.type == HUB_SESSION_START:
             self._spawn(self.session_start(p))
+        elif frame.type == "commands.list":
+            self._spawn(self.commands_list(p))
         elif frame.type == "catalog.get":
             self._spawn(self.catalog_get(p))
         elif frame.type == "login.open":
@@ -513,6 +515,18 @@ class Node:
             result = {"ok": False, "error": str(e)}
         self._refresh.set()
         await self._reply("start.result", p, result)
+
+    async def commands_list(self, p: dict[str, Any]) -> None:
+        sess = self.sessions.get(p.get("session_key", ""))
+        harness = str(p.get("harness") or (sess.harness if sess else "claude"))
+        cwd = str(p.get("cwd") or (sess.cwd if sess else ""))
+        config_dir = str((sess.extra.get("config_dir") if sess else "") or "")
+        try:
+            found = await asyncio.to_thread(commands.for_session, harness, cwd, config_dir)
+            result = {"ok": True, "harness": harness, "commands": found}
+        except OSError as e:
+            result = {"ok": False, "error": str(e)}
+        await self._reply("commands.result", p, result)
 
     async def catalog_get(self, p: dict[str, Any]) -> None:
         self.s.claude_config_dirs = discover_claude_dirs()

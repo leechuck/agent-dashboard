@@ -187,3 +187,54 @@ def test_handover_prompt_carries_the_state():
     )
     text = launcher.handover_prompt(old, "finish the report")
     assert "/t/r.jsonl" in text and "ship v1.4" in text and "finish the report" in text
+
+
+def test_slash_commands_come_from_the_harness_and_the_files_around_it(tmp_path, monkeypatch):
+    from agentdash.node import commands
+
+    home, work = tmp_path / "home", tmp_path / "work"
+    (home / ".claude" / "commands" / "team").mkdir(parents=True)
+    (home / ".claude" / "commands" / "note.md").write_text(
+        "---\ndescription: Take a note\nargument-hint: <text>\n---\nbody"
+    )
+    (home / ".claude" / "commands" / "team" / "standup.md").write_text(
+        "# Ask everyone for a status"
+    )
+    (home / ".claude" / "skills" / "gog").mkdir(parents=True)
+    (home / ".claude" / "skills" / "gog" / "SKILL.md").write_text(
+        "---\nname: gog\ndescription: Google Workspace CLI\n---"
+    )
+    plug = home / ".claude" / "plugins" / "cache" / "caveman" / "commands"
+    plug.mkdir(parents=True)
+    (plug / "stats.md").write_text("Token stats")
+    (home / ".claude" / "plugins" / "installed_plugins.json").write_text(
+        json.dumps(
+            {
+                "plugins": {
+                    "caveman@market": [{"installPath": str(plug.parent)}],
+                    "uninstalled@market": [{"installPath": "/nope"}],
+                }
+            }
+        )
+    )
+    (work / ".claude" / "commands").mkdir(parents=True)
+    (work / ".claude" / "commands" / "deploy.md").write_text(
+        "---\ndescription: Deploy this project\n---"
+    )
+    monkeypatch.setattr(commands.Path, "home", classmethod(lambda cls: home))
+
+    by = {c["name"]: c for c in commands.for_session("claude", str(work))}
+    assert by["compact"]["source"] == "builtin"
+    assert by["note"] == {
+        "name": "note",
+        "description": "Take a note",
+        "source": "user",
+        "args": "<text>",
+    }
+    assert by["team:standup"]["description"] == "Ask everyone for a status"
+    assert by["deploy"]["source"] == "project" and by["gog"]["source"] == "skill"
+    assert by["caveman:stats"]["source"] == "plugin"
+    # builtins first, then the project's own, and every name appears once
+    names = [c["name"] for c in commands.for_session("claude", str(work))]
+    assert len(names) == len(set(names)) and names.index("compact") < names.index("deploy")
+    assert {c["name"] for c in commands.for_session("codex", str(work))} >= {"approvals", "diff"}

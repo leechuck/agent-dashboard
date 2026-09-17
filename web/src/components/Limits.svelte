@@ -11,15 +11,18 @@
   const names: Record<string, string> = { anthropic: 'Claude', openai: 'Codex', openrouter: 'OpenRouter' }
   const plans: Record<string, string> = { max: 'Max plan', pro: 'Pro plan', plus: 'Plus plan' }
 
-  type Kind = 'session' | 'week' | 'money'
+  type Kind = 'session' | 'week' | 'scoped' | 'money'
+  /** A limit is a rolling session window, the plan-wide week, a week for one model or
+      surface (Fable, Opus, cowork, ...), or money. */
   function kindOf(w: UsageWindow): Kind {
     if (w.provider === 'openrouter' || w.window === 'extra_usage' || w.window === 'credits') return 'money'
-    if (w.window === 'five_hour' || /_300m$/.test(w.window)) return 'session'
-    return 'week'
+    if (w.window === 'session' || w.window === 'five_hour' || /_300m$/.test(w.window)) return 'session'
+    if (w.window === 'weekly' || w.window === 'seven_day' || /_10080m$/.test(w.window)) return 'week'
+    return String(w.detail?.group ?? '') === 'session' ? 'session' : 'scoped'
   }
 
   const subs = $derived.by(() => {
-    const out: { provider: string; account: string; several: boolean; command: string; machine: string; session?: UsageWindow; week: UsageWindow[]; money: UsageWindow[] }[] = []
+    const out: { provider: string; account: string; several: boolean; command: string; machine: string; session?: UsageWindow; week?: UsageWindow; scoped: UsageWindow[]; money: UsageWindow[] }[] = []
     for (const p of ['anthropic', 'openai']) {
       const accounts = [...new Set(windows.filter((w) => w.provider === p).map((w) => w.account))].sort()
       for (const a of accounts) {
@@ -31,7 +34,8 @@
           command: String(ws[0].detail?.config_dir ?? '').startsWith('.claude') ? 'claude' + String(ws[0].detail.config_dir).slice(7) : '',
           machine: ws[0].machine,
           session: ws.find((w) => kindOf(w) === 'session'),
-          week: ws.filter((w) => kindOf(w) === 'week'),
+          week: ws.find((w) => kindOf(w) === 'week'),
+          scoped: [...ws.filter((w) => kindOf(w) === 'scoped')].sort((a, b) => b.used_pct - a.used_pct),
           money: ws.filter((w) => kindOf(w) === 'money'),
         })
       }
@@ -128,19 +132,29 @@
       </div>
       <div class="pair">
         {@render gauge(s.session, 'Session · rolling 5 hours')}
-        {@render gauge(s.week[0], s.week[0]?.label && s.week[0].label !== '7 days' ? s.week[0].label : 'Week · rolling 7 days')}
+        {@render gauge(s.week, 'Week · everything')}
       </div>
-      {#if s.week.length > 1}
-        <div class="pair">
-          {#each s.week.slice(1) as w (w.window)}
-            {@render gauge(w, w.label)}
+      {#if s.scoped.length}
+        <div class="scoped">
+          <div class="sh small muted">Per model and surface, within the week</div>
+          {#each s.scoped as w (w.window)}
+            <div class={`srow ${tone(w.used_pct)}`}>
+              <span class="sname">{String(w.detail?.scope || w.label).replace(/^Week · /, '')}</span>
+              <span class="sbar"><span class="fill" style={`width:${Math.min(100, w.used_pct)}%`}></span></span>
+              <span class="spct">{w.used_pct.toFixed(0)}%</span>
+              <span class="small muted swhen">{w.resets_at ? countdown(w.resets_at) : w.detail?.active === false ? 'nothing used yet' : ''}</span>
+            </div>
           {/each}
         </div>
       {/if}
       {#each s.money as w (w.window)}
         <div class="money small">
-          <span>Extra usage this month</span>
-          <span class="muted">{usd(w.detail?.used)} of {usd(w.detail?.limit)} ({w.used_pct.toFixed(0)}%)</span>
+          <span>{w.label || 'Extra usage this month'}</span>
+          <span class="muted">
+            {#if w.detail?.used_usd !== undefined}{usd(w.detail.used_usd)} spent{w.detail?.remaining !== undefined ? ` · ${usd(w.detail.remaining)} left` : ''}
+            {:else}{usd(w.detail?.used)} of {usd(w.detail?.limit)}{/if}
+            ({w.used_pct.toFixed(0)}%)
+          </span>
         </div>
       {/each}
     </div>
@@ -186,6 +200,18 @@
   .phead { display: flex; gap: 10px; align-items: baseline; margin-bottom: 10px; flex-wrap: wrap; }
   .pname { font-weight: 600; font-size: 17px; }
   .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; }
+  .scoped { margin-top: 10px; display: grid; gap: 3px; }
+  .sh { margin-bottom: 2px; }
+  .srow { display: grid; grid-template-columns: minmax(80px, auto) 1fr 44px auto; gap: 10px; align-items: center; font-size: 13px; }
+  .sname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sbar { height: 6px; border-radius: 3px; background: var(--hairline); overflow: hidden; }
+  .sbar .fill { display: block; height: 100%; background: var(--cobalt); }
+  .srow.warn .fill { background: var(--amber); }
+  .srow.crit .fill { background: var(--signal); }
+  .srow.warn .spct { color: var(--amber); }
+  .srow.crit .spct { color: var(--signal); }
+  .spct { text-align: right; font-variant-numeric: tabular-nums; }
+  .swhen { white-space: nowrap; }
   .gauge { padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--radius); display: grid; gap: 4px; align-content: start; }
   .gauge.none { color: var(--muted); }
   .gt { font-size: 13px; color: var(--muted); }

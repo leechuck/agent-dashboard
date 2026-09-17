@@ -1,4 +1,4 @@
-import type { AgentChoice, AgentSettings, Catalog, Endpoint, AgentSettingsView, BusEvent, Cockpit, Decision, PAActResult, PAState, Machine, Message, Session, UsageWindow } from './types'
+import type { AgentChoice, AgentSettings, Catalog, Endpoint, SlashCommand, AgentSettingsView, BusEvent, Cockpit, Decision, PAActResult, PAState, Machine, Message, Session, UsageWindow } from './types'
 
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } })
@@ -43,6 +43,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(spec),
     }),
+  commands: (key: string) => j<{ ok: boolean; commands: SlashCommand[]; error?: string }>(`/api/sessions/${encodeURIComponent(key)}/commands`),
   catalog: (fresh = false) => j<Catalog>(`/api/catalog?fresh=${fresh}`),
   saveEndpoints: (endpoints: Endpoint[]) => j<{ ok: boolean }>('/api/settings/endpoints', { method: 'PUT', body: JSON.stringify({ endpoints }) }),
   openLogin: (machine: string, name: string) =>
