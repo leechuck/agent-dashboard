@@ -709,6 +709,21 @@ class Node:
                 log.exception("usage collection failed")
             await asyncio.sleep(self.s.usage_interval + random.uniform(0, 60))
 
+    async def pa_reminder_loop(self) -> None:
+        """Todos that became due turn into a push. The texts go to the hub to be pushed on,
+        never to be stored (the hub treats `pa.reminder` events that way)."""
+        minutes = self.s.pa_reminder_minutes
+        if minutes <= 0 or not self.pa.available:
+            return
+        await asyncio.sleep(45)
+        while True:
+            try:
+                for push in await self.pa.due_reminders():
+                    await self.hub.send(NODE_EVENT, {"kind": "pa.reminder", **push})
+            except Exception as e:  # noqa: BLE001
+                log.warning("todo reminders: %s", e)
+            await asyncio.sleep(minutes * 60)
+
     async def registry_watch(self) -> None:
         """Refresh the roster promptly when Claude's per-pid registry changes."""
         try:
@@ -737,6 +752,7 @@ class Node:
             self.tail_loop(),
             self.registry_watch(),
             self.usage_loop(),
+            self.pa_reminder_loop(),
             serve_hooks(self, self.s.node_host, self.s.node_port),
         )
 

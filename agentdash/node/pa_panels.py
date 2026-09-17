@@ -117,7 +117,7 @@ class Panels:
             raise PanelError(f"scripts/{cmd[0]} did not finish in {timeout} s") from e
         return proc.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace")
 
-    async def _json(self, cmd: list[str], timeout: int) -> dict[str, Any]:
+    async def run_json(self, cmd: list[str], timeout: int) -> dict[str, Any]:
         rc, out, err = await self._run(cmd, timeout)
         try:
             data = json.loads(out)
@@ -137,7 +137,7 @@ class Panels:
             hit = self._cache.get(name)
             if hit and not fresh and time.monotonic() - hit[0] < ttl:
                 return hit[1]
-            data = await self._json(cmd, timeout)
+            data = await self.run_json(cmd, timeout)
             if data.get("ok"):
                 self._cache[name] = (time.monotonic(), data)
             return data
@@ -148,7 +148,7 @@ class Panels:
         build, timeout, stale = ACTS[name]
         cmd = build(args if isinstance(args, dict) else {})
         if "--json" in cmd:
-            result = await self._json(cmd, timeout)
+            result = await self.run_json(cmd, timeout)
         else:
             rc, out, err = await self._run(cmd, timeout)
             result = {"ok": rc == 0, "output": out.strip()[-600:]}

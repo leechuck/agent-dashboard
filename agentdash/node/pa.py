@@ -13,6 +13,7 @@ import json
 import logging
 import re
 import tempfile
+from datetime import datetime
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ import yaml
 from ..config import Settings
 from ..models import Session, now_ms
 from .adapters.claude_cli import start_background
+from . import pa_reminders
 from .pa_panels import PanelError, Panels
 
 log = logging.getLogger(__name__)
@@ -180,6 +182,19 @@ class PersonalAssistant:
         state[item_id] = {"status": status, "note": note[:300], "at": now_ms()}
         self._save_state(state)
         return {"ok": True, "status": status}
+
+    # ---- reminders ---------------------------------------------------
+    async def due_reminders(self, now: datetime | None = None) -> list[dict[str, str]]:
+        """Pushes for todos that became due, each announced once (pa_reminders.plan)."""
+        if not self.available:
+            return []
+        data = await self.panels.run_json(["todo.py", "due-now", "--json"], 30)
+        state = self._state()
+        seen = state.get("_reminders", {}).get("seen") or {}
+        pushes, seen = pa_reminders.plan(data.get("items") or [], seen, now or datetime.now())
+        state["_reminders"] = {"seen": seen, "at": now_ms()}
+        self._save_state(state)
+        return pushes
 
     # ---- running the agent -------------------------------------------
     async def run(

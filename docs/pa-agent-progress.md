@@ -16,9 +16,13 @@ Contract between the node and the PA scripts: `docs/pa-panels.md`.
   `docs/pa-panels.md`. Tried on a scratch stack (ports 8797/8798, scratch PA copy) at
   1500 px and 412 px.
 
+- 2026-09-17: step 2, reminders. `node/pa_reminders.py` (rules, pure), timer in the node
+  runner, `HubState.node_event` pushes `pa.reminder` without storing or broadcasting.
+  Found on the way: `HubState.on_node_event` ("needs you at the terminal" push) is never
+  called from `ws_nodes.py`; left alone, it belongs to the other agent.
+
 ## Next (in this order)
 
-2. Reminders: node timer, `pa.reminder` event, hub push without storing.
 3. Agenda panel and quick add (no attendees, ever).
 4. Channels panel, notification log, "show in Ferdium".
 5. Hand-off composer, thread export, delegation list with live status.

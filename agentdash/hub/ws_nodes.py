@@ -123,13 +123,7 @@ async def nodes_ws(ws: WebSocket) -> None:
                 elif frame.type == NODE_DECISION_RESOLVED:
                     await state.decision_resolved(Decision.model_validate(p))
                 elif frame.type == NODE_EVENT:
-                    rid = p.get("request_id")
-                    if rid and state.resolve(rid, p):
-                        continue
-                    await state.db.add_event(
-                        link.machine, p.get("session_key", ""), p.get("kind", "event"), p
-                    )
-                    state.bus.publish("event", {"machine": link.machine, **p})
+                    await state.node_event(link.machine, p)
             except WebSocketDisconnect:
                 raise
             except Exception:  # noqa: BLE001

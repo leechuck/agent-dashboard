@@ -48,6 +48,15 @@ project names by pattern, text by length) before anything is run.
 | `todo_due` | `id`, `date` | `todo.py due ... -- ID DATE` |
 | `todo_sync` | | `todo_sync.py sync` (org, Google Tasks, completions pulled back) |
 
+## Reminders
+
+Every `AGENTDASH_PA_REMINDER_MINUTES` (default 10, 0 turns it off) the node runs
+`todo.py due-now --json` (same item shape as `todo`, only what is due today or overdue and
+not snoozed) and applies the rules in `agentdash/node/pa_reminders.py`: nothing at night,
+one digest on the first check of the day, afterwards one push per item that newly became
+due. What was announced is remembered in `~/.agentdash/pa-state.json`. The push travels
+as a `pa.reminder` event; the hub pushes it on and neither stores nor broadcasts it.
+
 ## Trying it without touching real data
 
 Point a development node at a scratch copy: `AGENTDASH_PA_DIR=<scratch>` with a
