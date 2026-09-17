@@ -551,13 +551,16 @@ class Node:
                 login=f".claude-{name}",
                 name=f"login-{name}",
             )
+            fresh = not (Path.home() / f".claude-{name}" / ".credentials.json").exists()
             result = await launch(spec, self.s, [])
-            if result.get("ok") and result.get("tmux"):
-                # let it start, then type the command so the owner only follows the prompts
+            if result.get("ok") and result.get("tmux") and not fresh:
+                # an empty slot asks by itself; a slot that is already logged in needs the
+                # command, and typing into the first screen of an empty one could answer it
                 await asyncio.sleep(7)
                 pane = result["tmux"]
                 with suppress(TmuxSendError):
                     await type_prompt(pane["socket"], pane["target"], "/login")
+            result["fresh"] = fresh
             result["notes"] = done
         except (LaunchError, ValueError) as e:
             result = {"ok": False, "error": str(e)}
