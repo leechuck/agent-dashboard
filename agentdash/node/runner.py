@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import platform
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +43,7 @@ from .adapters.claude_cli import job_action, kill_process
 from .adapters.claude_socket import SocketSendError, send_user_message
 from .adapters.claude_transcript import TranscriptTail, read_last
 from .adapters.claude_transcript import iter_messages as claude_iter
-from .adapters.tmux_keys import TmuxSendError, type_prompt
+from .adapters.tmux_keys import TmuxSendError, socket_path, type_prompt
 from .catalog import Catalog
 from .collectors.claude import ClaudeCollector
 from .collectors.codex import CodexCollector
@@ -360,9 +361,7 @@ class Node:
     async def terminal_open(self, p: dict[str, Any]) -> None:
         term_id = p.get("term_id", "")
         base = self.s.hub_url.rsplit("/nodes", 1)[0]
-        sock = str(p.get("socket", ""))
-        if sock and "/" not in sock:  # a server name, as `tmux -L` takes it
-            sock = f"/tmp/tmux-{os.getuid()}/{sock}"
+        sock = socket_path(str(p.get("socket", "")))
         t = TerminalSession(
             term_id,
             sock,
@@ -522,7 +521,10 @@ class Node:
         cwd = str(p.get("cwd") or (sess.cwd if sess else ""))
         config_dir = str((sess.extra.get("config_dir") if sess else "") or "")
         try:
-            found = await asyncio.to_thread(commands.for_session, harness, cwd, config_dir)
+            # the catalog already knows this machine's models, and keeps them for a while
+            cat = await self.catalog.get(self._endpoints(p))
+            models = (cat.get("models") or {}).get(harness) or []
+            found = await asyncio.to_thread(commands.for_session, harness, cwd, config_dir, models)
             result = {"ok": True, "harness": harness, "commands": found}
         except OSError as e:
             result = {"ok": False, "error": str(e)}
@@ -550,6 +552,12 @@ class Node:
                 name=f"login-{name}",
             )
             result = await launch(spec, self.s, [])
+            if result.get("ok") and result.get("tmux"):
+                # let it start, then type the command so the owner only follows the prompts
+                await asyncio.sleep(7)
+                pane = result["tmux"]
+                with suppress(TmuxSendError):
+                    await type_prompt(pane["socket"], pane["target"], "/login")
             result["notes"] = done
         except (LaunchError, ValueError) as e:
             result = {"ok": False, "error": str(e)}
@@ -785,7 +793,6 @@ def _decision_reply(behavior: str, reason: str = "") -> dict[str, Any]:
 
 def _extend_path() -> None:
     """Make user-installed agent binaries visible even under systemd's minimal PATH."""
-    import os
 
     home = Path.home()
     extra = [home / ".local" / "bin", home / ".opencode" / "bin", home / ".cargo" / "bin"]

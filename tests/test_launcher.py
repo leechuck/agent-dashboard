@@ -230,6 +230,8 @@ def test_slash_commands_come_from_the_harness_and_the_files_around_it(tmp_path, 
         "description": "Take a note",
         "source": "user",
         "args": "<text>",
+        "options": [],
+        "free": True,  # a hint with no list means free text
     }
     assert by["team:standup"]["description"] == "Ask everyone for a status"
     assert by["deploy"]["source"] == "project" and by["gog"]["source"] == "skill"
@@ -238,3 +240,44 @@ def test_slash_commands_come_from_the_harness_and_the_files_around_it(tmp_path, 
     names = [c["name"] for c in commands.for_session("claude", str(work))]
     assert len(names) == len(set(names)) and names.index("compact") < names.index("deploy")
     assert {c["name"] for c in commands.for_session("codex", str(work))} >= {"approvals", "diff"}
+
+
+def test_a_command_says_what_may_follow_it(tmp_path, monkeypatch):
+    from agentdash.node import commands
+
+    monkeypatch.setattr(commands.Path, "home", classmethod(lambda cls: tmp_path))
+    models = [
+        {"id": "", "label": "as configured"},
+        {"id": "fable", "label": "Fable"},
+        {"id": "haiku", "label": "Haiku"},
+    ]
+    by = {c["name"]: c for c in commands.for_session("claude", str(tmp_path), models=models)}
+    assert [o["value"] for o in by["model"]["options"]] == [
+        "fable",
+        "haiku",
+    ]  # the blank is not a choice
+    assert by["model"]["args"] == "<model>" and not by["model"]["free"]
+    assert [o["value"] for o in by["effort"]["options"]] == [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+    ]
+    assert by["compact"]["free"] and by["compact"]["args"] == "[what to keep]"
+    assert by["clear"]["options"] == [] and not by["clear"]["free"]  # takes nothing
+    codex = {c["name"]: c for c in commands.for_session("codex", str(tmp_path), models=models)}
+    assert [o["value"] for o in codex["approvals"]["options"]] == [
+        "read-only",
+        "auto",
+        "full-access",
+    ]
+
+
+def test_a_tmux_server_name_becomes_a_socket_path(monkeypatch):
+    from agentdash.node.adapters.tmux_keys import socket_path
+
+    monkeypatch.setattr("os.getuid", lambda: 1000)
+    assert socket_path("default") == "/tmp/tmux-1000/default"
+    assert socket_path("/tmp/tmux-1000/ubar") == "/tmp/tmux-1000/ubar"
+    assert socket_path("") == ""

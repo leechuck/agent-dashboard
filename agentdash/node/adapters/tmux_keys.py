@@ -6,13 +6,22 @@ The text goes in as a bracketed paste (so newlines do not submit early), then En
 from __future__ import annotations
 
 import asyncio
+import os
 
 
 class TmuxSendError(Exception):
     pass
 
 
+def socket_path(socket: str) -> str:
+    """`tmux -S` wants a path; a bare name is a server as `tmux -L` names it."""
+    if socket and "/" not in socket:
+        return f"/tmp/tmux-{os.getuid()}/{socket}"
+    return socket
+
+
 async def _tmux(socket: str, *args: str) -> None:
+    socket = socket_path(socket)
     proc = await asyncio.create_subprocess_exec(
         "tmux",
         "-S",

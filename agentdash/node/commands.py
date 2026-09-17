@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -66,11 +66,19 @@ _FRONT = re.compile(r"^---\n(.*?)\n---", re.S)
 
 
 @dataclass
+class Option:
+    value: str
+    label: str = ""
+
+
+@dataclass
 class Command:
     name: str  # without the slash
     description: str = ""
     source: str = "builtin"  # builtin | user | project | plugin | skill
     args: str = ""  # a hint such as "<level>" when the command takes one
+    options: list[dict[str, str]] = field(default_factory=list)  # what the argument may be
+    free: bool = False  # anything may follow, the hint says what
 
 
 def _describe(path: Path) -> tuple[str, str]:
@@ -145,7 +153,69 @@ def _skills(config_dir: Path, cwd: Path) -> list[Command]:
     return out
 
 
-def for_session(harness: str, cwd: str, config_dir: str = "") -> list[dict[str, Any]]:
+# What follows a command. A list means the browser can offer the choices; `free` means
+# anything goes and only the hint is shown.
+ARGUMENTS: dict[str, dict[str, dict[str, Any]]] = {
+    "claude": {
+        "model": {"hint": "<model>", "from": "models"},
+        "effort": {"hint": "<level>", "values": ["low", "medium", "high", "xhigh", "max"]},
+        "compact": {"hint": "[what to keep]", "free": True},
+        "permissions": {"hint": "[tool]", "free": True},
+        "resume": {"hint": "[session]", "free": True},
+        "review": {"hint": "[what to look at]", "free": True},
+        "memory": {"hint": "[what to remember]", "free": True},
+    },
+    "codex": {
+        "model": {"hint": "<model>", "from": "models"},
+        "approvals": {
+            "hint": "<mode>",
+            "values": ["read-only", "auto", "full-access"],
+        },
+        "compact": {"hint": "[what to keep]", "free": True},
+        "review": {"hint": "[what to look at]", "free": True},
+    },
+    "pi": {
+        "model": {"hint": "<model>", "from": "models"},
+        "thinking": {
+            "hint": "<level>",
+            "values": ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+        },
+    },
+    "opencode": {"model": {"hint": "<model>", "from": "models"}},
+}
+
+
+def _apply_arguments(
+    found: list[Command], harness: str, models: list[dict[str, Any]] | None
+) -> None:
+    """Tell each command what may follow it, so the browser can complete that too."""
+    rules = ARGUMENTS.get(harness, {})
+    by_name = {c.name: c for c in found}
+    for name, rule in rules.items():
+        c = by_name.get(name)
+        if c is None:
+            continue
+        c.args = c.args or str(rule.get("hint") or "")
+        c.free = bool(rule.get("free"))
+        if rule.get("from") == "models":
+            c.options = [
+                {"value": str(m.get("id")), "label": str(m.get("label") or m.get("id"))}
+                for m in models or []
+                if m.get("id")
+            ]
+        elif rule.get("values"):
+            c.options = [{"value": v, "label": ""} for v in rule["values"]]
+    for c in found:
+        if c.args and not c.options:
+            c.free = True  # a command file that declares a hint takes free text
+
+
+def for_session(
+    harness: str,
+    cwd: str,
+    config_dir: str = "",
+    models: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Everything this session would accept after a slash, most useful first."""
     home = Path.home()
     work = Path(cwd).expanduser() if cwd else home
@@ -162,6 +232,7 @@ def for_session(harness: str, cwd: str, config_dir: str = "") -> list[dict[str, 
         found += _from_dir(home / ".codex" / "prompts", "user")
     elif harness == "pi":
         found += _from_dir(home / ".pi" / "agent" / "commands", "user")
+    _apply_arguments(found, harness, models)
     rank = {"builtin": 0, "project": 1, "user": 2, "skill": 3, "plugin": 4}
     seen: set[str] = set()
     out = []

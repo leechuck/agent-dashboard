@@ -275,7 +275,7 @@
     <div class="row"><button type="button" onclick={addEndpoint}>Add endpoint</button><span class="small muted">{epMsg}</span><button class="primary" onclick={saveEndpoints}>Save endpoints</button></div>
 
     <h2>Claude logins</h2>
-    <p class="small muted">Each subscription is a login of its own on each machine. "Log in" opens Claude for that login in a terminal here: type <code>/login</code>, open the address it prints, paste the code back. Logins share instructions, skills and transcripts, so a session can move from one subscription to the other (Switch agent / model on a session).</p>
+    <p class="small muted">Every subscription can stay logged in at the same time: each lives in its own directory with its own credentials, and nothing logs the others out. "Log in" opens Claude for that login in a terminal here and types <code>/login</code> for you; follow the prompts, open the address it prints and paste the code back. All slots share instructions, skills and transcripts, so a running session can move from one subscription to the other with "Switch agent / model", and the Limits page shows every plan you are logged into.</p>
     {#each Object.entries(cat?.machines ?? {}) as [m, c] (m)}
       {#if c.ok && c.harnesses?.claude}
         <div class="card">
@@ -288,7 +288,7 @@
             </div>
           {/each}
           <div class="lrow">
-            <input placeholder="new login name, e.g. team" value={loginName[m] ?? ''} oninput={(e) => (loginName[m] = e.currentTarget.value.toLowerCase())} />
+            <input placeholder="another subscription, e.g. personal" value={loginName[m] ?? ''} oninput={(e) => (loginName[m] = e.currentTarget.value.replace(/[^a-z0-9_-]/g, ''))} onkeydown={(e) => { if (e.key === 'Enter' && loginName[m]) openLogin(m, loginName[m]) }} />
             <button type="button" disabled={!loginName[m]} onclick={() => openLogin(m, loginName[m])}>Add and log in</button>
           </div>
           {#if loginMsg[m]}<p class="small bad inner">{loginMsg[m]}</p>{/if}

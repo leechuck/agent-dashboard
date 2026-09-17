@@ -327,5 +327,10 @@ export interface SlashCommand {
   name: string
   description: string
   source: 'builtin' | 'user' | 'project' | 'plugin' | 'skill'
+  /** hint for what may follow, such as "<model>" */
   args: string
+  /** the values the argument may take, when they are known */
+  options: { value: string; label: string }[]
+  /** anything may follow; only the hint is shown */
+  free: boolean
 }

@@ -24,34 +24,57 @@
   // Enter has to stay a line break, so the button (or Ctrl+Enter) sends there
   const touch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
 
-  // ---- slash commands: offered while the first line is being typed as "/name"
+  // ---- slash commands, in two stages: the command, then what may follow it
   const session = $derived(fleet.sessions[sessionKey])
   const inTmux = $derived(!!(session?.extra as Record<string, unknown> | undefined)?.tmux)
-  const typedCommand = $derived(/^\/([\w:-]*)$/.exec(text.split('\n')[0]) && !text.includes('\n') ? /^\/([\w:-]*)/.exec(text)![1] : null)
   const all = $derived(fleet.commands[sessionKey] ?? [])
-  const matches = $derived.by(() => {
-    if (typedCommand === null) return []
-    const q = typedCommand.toLowerCase()
+  const firstLine = $derived(text.split('\n')[0])
+  const onlyLine = $derived(!text.includes('\n'))
+  /** null = not completing; otherwise the command being typed and the argument after it. */
+  const typing = $derived.by(() => {
+    if (!onlyLine || !firstLine.startsWith('/')) return null
+    const m = /^\/([\w:-]*)(\s+)?(.*)$/.exec(firstLine)
+    if (!m) return null
+    return { name: m[1], started: !!m[2], arg: m[3] }
+  })
+  const command = $derived(typing?.started ? (all.find((c) => c.name === typing.name) ?? null) : null)
+  type Row = { insert: string; label: string; note: string; tag: string }
+  const rows = $derived.by((): Row[] => {
+    if (!typing) return []
+    if (command) {
+      const q = typing.arg.toLowerCase()
+      return command.options
+        .filter((o) => o.value.toLowerCase().includes(q) || o.label.toLowerCase().includes(q))
+        .sort((a, b) => Number(b.value.toLowerCase().startsWith(q)) - Number(a.value.toLowerCase().startsWith(q)))
+        .slice(0, 10)
+        .map((o) => ({ insert: `/${command.name} ${o.value}`, label: o.value, note: o.label === o.value ? '' : o.label, tag: '' }))
+    }
+    if (typing.started) return []
+    const q = typing.name.toLowerCase()
     return all
       .filter((c) => c.name.toLowerCase().includes(q))
       .sort((a, b) => Number(b.name.toLowerCase().startsWith(q)) - Number(a.name.toLowerCase().startsWith(q)))
       .slice(0, 8)
+      .map((c) => ({ insert: `/${c.name}${c.args ? ' ' : ''}`, label: `/${c.name}`, note: c.description, tag: c.source === 'builtin' ? '' : c.source }))
   })
+  /** The hint under the box while an argument is being typed, when there is no list. */
+  const argHint = $derived(command && !rows.length ? command.args || '' : '')
   let picked = $state(0)
   let menu: HTMLElement | undefined = $state()
   $effect(() => {
-    if (typedCommand !== null) fleet.loadCommands(sessionKey)
+    if (typing) fleet.loadCommands(sessionKey)
   })
   $effect(() => {
-    typedCommand
+    typing?.name
+    typing?.started
     picked = 0
   })
   $effect(() => {
     picked
     queueMicrotask(() => menu?.querySelector('.on')?.scrollIntoView({ block: 'nearest' }))
   })
-  function complete(c: SlashCommand) {
-    fleet.setDraft(sessionKey, `/${c.name}${c.args ? ' ' : ''}`)
+  function complete(r: Row) {
+    fleet.setDraft(sessionKey, r.insert)
     box?.focus()
   }
 
@@ -67,14 +90,15 @@
     if (await onsend(text.trim())) fleet.setDraft(key, '')
   }
   function key(e: KeyboardEvent) {
-    if (matches.length) {
+    if (rows.length) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        picked = (picked + (e.key === 'ArrowDown' ? 1 : matches.length - 1)) % matches.length
+        picked = (picked + (e.key === 'ArrowDown' ? 1 : rows.length - 1)) % rows.length
         e.preventDefault()
         return
       }
-      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && !touch)) {
-        complete(matches[picked])
+      // Tab always completes; Enter completes the command, then sends the finished line
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && !touch && !command)) {
+        complete(rows[picked])
         e.preventDefault()
         return
       }
@@ -94,21 +118,24 @@
 </script>
 
 <form class="composer" onsubmit={submit}>
-  {#if matches.length}
-    <div class="menu" bind:this={menu} role="listbox" aria-label="Commands">
-      {#each matches as c, i (c.name)}
+  {#if rows.length}
+    <div class="menu" bind:this={menu} role="listbox" aria-label={command ? `Values for /${command.name}` : 'Commands'}>
+      {#if command}<div class="head small muted">/{command.name} {command.args}</div>{/if}
+      {#each rows as r, i (r.insert)}
         <button type="button" class="item" class:on={i === picked} role="option" aria-selected={i === picked}
-          onmouseenter={() => (picked = i)} onclick={() => complete(c)}>
-          <span class="cname">/{c.name}{#if c.args}<span class="cargs"> {c.args}</span>{/if}</span>
-          <span class="cdesc">{c.description}</span>
-          {#if c.source !== 'builtin'}<span class="csrc">{c.source}</span>{/if}
+          onmouseenter={() => (picked = i)} onclick={() => complete(r)}>
+          <span class="cname">{r.label}</span>
+          <span class="cdesc">{r.note}</span>
+          {#if r.tag}<span class="csrc">{r.tag}</span>{/if}
         </button>
       {/each}
       <div class="foot small muted">
-        ↑↓ choose · Tab completes{inTmux ? '' : ' · this session is not in tmux, so a command cannot be delivered'}
+        ↑↓ choose · Tab completes{command ? ' · Enter sends' : ''}{inTmux ? '' : ' · this session is not in tmux, so a command cannot be delivered'}
       </div>
     </div>
-  {:else if typedCommand !== null && !all.length}
+  {:else if argHint}
+    <div class="menu"><div class="foot small muted">/{command?.name} {argHint} · Enter sends</div></div>
+  {:else if typing && !typing.started && !all.length}
     <div class="menu"><div class="foot small muted">Looking up the commands this session accepts…</div></div>
   {/if}
   <textarea rows="2" bind:this={box} value={text} oninput={(e) => fleet.setDraft(sessionKey, e.currentTarget.value)} placeholder={disabled ? hint : 'Send a message, or / for a command'} {disabled} onkeydown={key}></textarea>
@@ -141,6 +168,7 @@
   .cargs { font-weight: 400; color: var(--muted); }
   .cdesc { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .csrc { font-size: 11px; color: var(--muted); border: 1px solid var(--hairline); border-radius: 8px; padding: 0 6px; white-space: nowrap; }
+  .head { padding: 6px 12px 4px; border-bottom: 1px solid var(--hairline); font-family: var(--mono); }
   .foot { padding: 5px 12px 7px; border-top: 1px solid var(--hairline); position: sticky; bottom: 0; background: var(--surface); }
   @media (max-width: 600px) { .cdesc { display: none; } }
 </style>
