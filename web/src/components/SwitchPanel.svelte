@@ -7,9 +7,11 @@
 
   let { session, onclose }: { session: Session; onclose: () => void } = $props()
   const x = $derived((session.extra ?? {}) as Record<string, any>)
+  // a bare tmux pane is the agent running in it (often one still at a trust or login question)
+  const harness = session.harness === 'tmux' ? String((session.extra as any)?.agent ?? '') : session.harness
   // start from what the session is on now
   let agent = $state<AgentChoice>({
-    harness: ['claude', 'codex', 'pi', 'opencode'].includes(session.harness) ? session.harness : 'claude',
+    harness: ['claude', 'codex', 'pi', 'opencode'].includes(harness) ? harness : 'claude',
     backend: 'default', login: '', endpoint: '', model: '', effort: '', permissions: 'default',
   })
   let note = $state('')
@@ -17,8 +19,8 @@
   let force = $state(false)
   let busy = $state(false)
   let result = $state<{ ok: boolean; text: string; terminal?: string } | null>(null)
-  const same = $derived(agent.harness === session.harness)
-  const resumable = ['claude', 'codex', 'pi'].includes(session.harness)
+  const same = $derived(agent.harness === harness)
+  const resumable = ['claude', 'codex', 'pi'].includes(harness)
 
   onMount(() => fleet.loadCatalog())
 

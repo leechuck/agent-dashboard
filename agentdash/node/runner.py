@@ -763,6 +763,8 @@ class Node:
         sess = await self.locate(p.get("session_key", ""))
         if not sess:
             raise LaunchError("unknown session")
+        if sess.harness == "tmux":
+            sess = _pane_as_agent(sess)
         if sess.harness not in ("claude", "codex", "pi"):
             raise LaunchError(f"{sess.harness} sessions cannot be restarted from here")
         self.s.claude_config_dirs = discover_claude_dirs()
@@ -787,6 +789,10 @@ class Node:
             # pi resumes by file; the others by id
             target.resume = sess.transcript_path if sess.harness == "pi" else sess.session_id
             target.prompt = str(p.get("note") or "")
+            if not sess.session_id:
+                # started but never got going (a trust or login question in its way): there
+                # is no conversation yet, so start it again with the task it was given
+                target.prompt = target.prompt or str(sess.extra.get("launch_prompt") or "")
             target.name = target.name or sess.name
             if sess.pid:
                 await self._stop(sess)
@@ -800,7 +806,9 @@ class Node:
         result = await launch(target, self.s, self._endpoints(p))
         result["resumed"] = same_harness
         result["session_key"] = (
-            Session.make_key(self.machine, target.harness, sess.session_id) if same_harness else ""
+            Session.make_key(self.machine, target.harness, sess.session_id)
+            if same_harness and sess.session_id
+            else ""
         )
         return result
 
@@ -965,6 +973,26 @@ class Node:
             self.pa_reminder_loop(),
             serve_hooks(self, self.s.node_host, self.s.node_port),
         )
+
+
+def _pane_as_agent(sess: Session) -> Session:
+    """A tmux pane whose agent has no session of its own yet, seen as that agent: what it
+    resumes (if anything) is read from its command line."""
+    agent = str(sess.extra.get("agent") or "")
+    if agent not in ("claude", "codex", "pi"):
+        return sess
+    x = dict(sess.extra)
+    resume = str(x.get("resume") or "")
+    out = sess.model_copy(
+        update={
+            "harness": Harness(agent),
+            "session_id": resume,
+            "name": str(x.get("launch_name") or sess.name),
+            "transcript_path": resume if agent == "pi" else "",
+            "extra": x,
+        }
+    )
+    return out
 
 
 def _credentials_alive(path: Path) -> bool:

@@ -99,6 +99,34 @@ _QUESTIONS = (
 )
 
 
+def launch_facts(agent: str, pid: int) -> dict[str, str]:
+    """How a pane's agent was started: the conversation it resumes, the Claude login it
+    runs on, the task it was given. Enough to restart it with other settings before it
+    has registered a session of its own (it may sit at a trust or login question)."""
+    argv = procs.cmdline(pid)
+    out: dict[str, str] = {}
+    flag = {"claude": "--resume", "codex": "resume", "pi": "--session"}.get(agent, "")
+    if flag in argv:
+        i = argv.index(flag)
+        if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
+            out["resume"] = argv[i + 1]
+    if agent == "claude":
+        config = procs.env_of(pid, "CLAUDE_CONFIG_DIR")
+        if config:
+            out["config_dir"] = config
+        if "--name" in argv:
+            i = argv.index("--name")
+            if i + 1 < len(argv):
+                out["launch_name"] = argv[i + 1]
+    # the task: a last positional argument that is not the value of a flag
+    if len(argv) > 1 and not argv[-1].startswith("-") and argv[-2] not in (
+        "--resume", "--name", "--model", "--effort", "--permission-mode", "-m", "-c",
+        "resume", "--session", "--thinking",
+    ):  # fmt: skip
+        out["launch_prompt"] = argv[-1]
+    return out
+
+
 class TmuxCollector:
     def __init__(self, machine: str) -> None:
         self.machine = machine
@@ -146,6 +174,7 @@ class TmuxCollector:
                     extra={
                         "tmux": {"socket": pane.socket, "target": pane.target},
                         "agent": pane.agent,
+                        **launch_facts(pane.agent, pane.agent_pid),
                     },
                 )
             )

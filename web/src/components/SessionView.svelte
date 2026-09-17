@@ -21,7 +21,7 @@
   let moving = $state(false)
   let resumeMsg = $state('')
   const live = $derived(!!session && ['busy', 'idle', 'waiting'].includes(session.status))
-  const resumable = $derived(!!session && ['claude', 'codex', 'pi'].includes(session.harness))
+  const resumable = $derived(!!session && ['claude', 'codex', 'pi'].includes(session.harness === 'tmux' ? String(x.agent ?? '') : session.harness))
   const elsewhere = $derived(Object.values(fleet.machines).some((m) => m.online && session && m.id !== session.machine))
   /** Start this conversation again where it is, with the same agent and settings. */
   async function resume() {

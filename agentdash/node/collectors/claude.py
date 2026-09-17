@@ -51,9 +51,14 @@ def account_of(config_dir: Path) -> dict[str, str]:
     if not has_oauth:
         name = config_dir.name.removeprefix(".claude-") if config_dir.name != ".claude" else ""
         return {"provider": name or "anthropic", "plan": "", "account": ""}
-    profile = config_dir.parent / ".claude.json" if config_dir.name == ".claude" else None
+    # Claude Code keeps the default login's profile in ~/.claude.json; a .claude.json inside
+    # ~/.claude is a leftover and may name an account that logged out long ago
+    if config_dir.name == ".claude":
+        profiles = (config_dir.parent / ".claude.json", config_dir / ".claude.json")
+    else:
+        profiles = (config_dir / ".claude.json", None)
     org = ""
-    for f in (config_dir / ".claude.json", profile):
+    for f in profiles:
         try:
             acct = json.loads(f.read_text()).get("oauthAccount") if f else None
         except (OSError, json.JSONDecodeError):

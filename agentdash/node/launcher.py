@@ -123,6 +123,40 @@ def claude_config_dir(s: Settings, name: str) -> Path:
     raise LaunchError(f"no Claude login called {name} on this machine")
 
 
+def carry_trust(cwd: str, config_dir: Path, home: Path | None = None) -> bool:
+    """Trust in a folder is kept per login. A folder the owner already trusted on the main
+    login is trusted on this one too, or every session moved to another subscription stops
+    at the question in a terminal nobody is looking at. Folders never trusted stay asking."""
+    home = home or Path.home()
+    main, target = home / ".claude.json", config_dir / ".claude.json"
+    if config_dir.resolve() == (home / ".claude").resolve():
+        return False  # the main login itself
+    try:
+        trusted = json.loads(main.read_text()).get("projects", {})
+    except (OSError, ValueError, AttributeError):
+        return False
+    folder = Path(cwd)
+    if not any(
+        (trusted.get(str(d)) or {}).get("hasTrustDialogAccepted") for d in (folder, *folder.parents)
+    ):
+        return False
+    try:
+        data = json.loads(target.read_text())
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        return False
+    entry = data.setdefault("projects", {}).setdefault(str(folder), {})
+    if entry.get("hasTrustDialogAccepted"):
+        return False
+    entry["hasTrustDialogAccepted"] = True
+    tmp = target.with_name(f".claude.json.agentdash-{secrets.token_hex(4)}")
+    tmp.write_text(json.dumps(data, indent=2))
+    tmp.chmod(0o600)
+    tmp.replace(target)
+    return True
+
+
 def build(
     spec: LaunchSpec, s: Settings, endpoints: list[Endpoint]
 ) -> tuple[list[str], dict[str, str]]:
@@ -277,6 +311,8 @@ async def launch(spec: LaunchSpec, s: Settings, endpoints: list[Endpoint]) -> di
     if not spec.prompt and not spec.resume and spec.mode == "background":
         raise LaunchError("a background job needs a task")
     argv, env = build(spec, s, endpoints)
+    if spec.harness == "claude" and env.get("CLAUDE_CONFIG_DIR"):
+        carry_trust(str(cwd), Path(env["CLAUDE_CONFIG_DIR"]))
     if spec.harness == "claude" and spec.mode == "background":
         r = await start_background(
             str(cwd),

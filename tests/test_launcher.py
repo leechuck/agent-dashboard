@@ -281,3 +281,48 @@ def test_a_tmux_server_name_becomes_a_socket_path(monkeypatch):
     assert socket_path("default") == "/tmp/tmux-1000/default"
     assert socket_path("/tmp/tmux-1000/ubar") == "/tmp/tmux-1000/ubar"
     assert socket_path("") == ""
+
+
+def test_a_folder_trusted_on_the_main_login_is_trusted_on_another(tmp_path):
+    main = {"projects": {"/w": {"hasTrustDialogAccepted": True}, "/x": {}}}
+    (tmp_path / ".claude.json").write_text(json.dumps(main))
+    team = tmp_path / ".claude-team"
+    team.mkdir()
+    (team / ".claude.json").write_text(json.dumps({"numStartups": 3}))
+    assert launcher.carry_trust("/w/sub", team, tmp_path)  # a parent folder counts
+    data = json.loads((team / ".claude.json").read_text())
+    assert data["projects"]["/w/sub"]["hasTrustDialogAccepted"] and data["numStartups"] == 3
+    assert not launcher.carry_trust("/w/sub", team, tmp_path)  # already there
+    assert not launcher.carry_trust("/x", team, tmp_path)  # never trusted: still asks
+    assert not launcher.carry_trust("/w", tmp_path / ".claude", tmp_path)  # main login
+
+
+def test_a_pane_waiting_at_a_question_can_be_restarted_as_its_agent(monkeypatch):
+    from agentdash.models import Harness, Session
+    from agentdash.node.collectors import tmux
+    from agentdash.node.runner import _pane_as_agent
+
+    argv = ["/bin/claude", "--resume", "abc", "--name", "hub-build"]
+    monkeypatch.setattr(tmux.procs, "cmdline", lambda pid: argv)
+    monkeypatch.setattr(tmux.procs, "env_of", lambda pid, name: "/h/.claude-personal")
+    facts = tmux.launch_facts("claude", 7)
+    assert facts == {
+        "resume": "abc",
+        "config_dir": "/h/.claude-personal",
+        "launch_name": "hub-build",
+    }
+    pane = Session(
+        key="m:tmux:default:x:0.0",
+        machine="m",
+        harness=Harness.tmux,
+        session_id="default:x:0.0",
+        extra={"agent": "claude", **facts},
+    )
+    s = _pane_as_agent(pane)
+    assert (s.harness, s.session_id, s.name) == ("claude", "abc", "hub-build")
+
+    argv[:] = ["/bin/claude", "--name", "handover", "Continue that work."]
+    fresh = _pane_as_agent(
+        pane.model_copy(update={"extra": {"agent": "claude", **tmux.launch_facts("claude", 7)}})
+    )
+    assert fresh.session_id == "" and fresh.extra["launch_prompt"] == "Continue that work."
