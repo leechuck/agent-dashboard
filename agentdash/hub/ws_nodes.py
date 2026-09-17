@@ -87,9 +87,13 @@ async def nodes_ws(ws: WebSocket) -> None:
                 continue
             if frame.type == NODE_SESSIONS:
                 sessions = [Session.model_validate(s) for s in p.get("sessions", [])]
+                previous = {
+                    s.key: s.status for s in await state.db.list_sessions(machine=link.machine)
+                }
                 changed = await state.db.replace_sessions(link.machine, sessions)
                 for s in changed:
                     state.bus.publish("session.updated", s.model_dump())
+                    await state.on_session_transition(s, previous.get(s.key))
             elif frame.type == NODE_MESSAGES:
                 key = p.get("session_key", "")
                 msgs = [Message.model_validate(m) for m in p.get("messages", [])]

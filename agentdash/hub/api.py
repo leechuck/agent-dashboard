@@ -176,6 +176,36 @@ async def start_session(machine_id: str, body: StartBody, request: Request):
         raise HTTPException(504, "node did not answer") from e
 
 
+class CleanupBody(BaseModel):
+    older_than_hours: float = 48
+    keys: list[str] | None = None  # explicit selection, else every stale one
+
+
+@router.post("/machines/{machine_id}/cleanup")
+async def cleanup(machine_id: str, body: CleanupBody, request: Request):
+    """Remove stale finished/blocked background sessions (Claude `rm`); others are only hidden."""
+    from ..models import now_ms as _now
+
+    st = _state(request)
+    cutoff = _now() - body.older_than_hours * 3600 * 1000
+    targets = []
+    for s in await st.db.list_sessions(machine_id, limit=2000):
+        if body.keys is not None and s.key not in body.keys:
+            continue
+        if body.keys is None and (s.status == "busy" or s.updated_at > cutoff):
+            continue
+        if s.harness == "claude" and s.kind == "background":
+            targets.append(s.key)
+    results = []
+    for key in targets:
+        try:
+            r = await st.session_action(key, "rm")
+        except TimeoutError:
+            r = {"ok": False, "error": "timeout"}
+        results.append({"key": key, **{k: r.get(k) for k in ("ok", "error")}})
+    return {"removed": sum(1 for r in results if r.get("ok")), "results": results}
+
+
 @router.get("/machines/{machine_id}/dirs")
 async def machine_dirs(machine_id: str, request: Request):
     """Recently used working directories on a machine, most recent first."""

@@ -42,6 +42,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(spec),
     }),
+  cleanup: (machine: string, keys?: string[]) =>
+    j<{ removed: number; results: { key: string; ok: boolean; error?: string }[] }>(`/api/machines/${encodeURIComponent(machine)}/cleanup`, {
+      method: 'POST',
+      body: JSON.stringify({ older_than_hours: 48, keys }),
+    }),
   dirs: (machine: string) => j<string[]>(`/api/machines/${encodeURIComponent(machine)}/dirs`),
   usage: () => j<UsageWindow[]>('/api/usage'),
   usageHistory: (provider: string, window: string, hours = 48) =>

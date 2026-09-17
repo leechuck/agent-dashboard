@@ -33,12 +33,41 @@ async def _run(args: list[str], config_dir: str | None, cwd: str | None, timeout
     return proc.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace")
 
 
+async def _ensure_supervisor(config_dir: str | None) -> None:
+    """`claude rm/stop` need the background supervisor; run one detached if it is down."""
+    env = dict(os.environ)
+    if config_dir:
+        env["CLAUDE_CONFIG_DIR"] = config_dir
+    try:
+        await asyncio.create_subprocess_exec(
+            "claude",
+            "daemon",
+            "run",
+            env=env,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        return
+    await asyncio.sleep(5)
+
+
 async def job_action(action: str, job_id: str, config_dir: str | None) -> dict[str, Any]:
     """stop | rm | respawn | logs on a background session id."""
     if action not in ("stop", "rm", "respawn", "logs"):
         return {"ok": False, "error": f"unsupported action {action}"}
     rc, out, err = await _run([action, job_id], config_dir, None)
-    return {"ok": rc == 0, "output": (out + err).strip()[-2000:], "rc": rc}
+    text = (out + err).strip()
+    if rc != 0 and "restarting" in text:
+        await _ensure_supervisor(config_dir)
+        rc, out, err = await _run([action, job_id], config_dir, None)
+        text = (out + err).strip()
+    result: dict[str, Any] = {"ok": rc == 0, "output": text[-2000:], "rc": rc}
+    if rc != 0:
+        result["error"] = text.splitlines()[-1][:200] if text else f"exit {rc}"
+    return result
 
 
 def kill_process(pid: int, hard: bool = False) -> dict[str, Any]:

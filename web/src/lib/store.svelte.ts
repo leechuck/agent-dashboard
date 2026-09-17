@@ -1,7 +1,7 @@
 import { api, subscribe } from './api'
 import type { BusEvent, Decision, Machine, Message, Session, UsageWindow } from './types'
 
-class Fleet {
+export class Fleet {
   machines = $state<Record<string, Machine>>({})
   sessions = $state<Record<string, Session>>({})
   messages = $state<Record<string, Message[]>>({})
@@ -35,6 +35,8 @@ class Fleet {
     } else if (e.kind === 'machine.updated') {
       const m = e.data as Partial<Machine> & { id: string }
       this.machines[m.id] = { ...(this.machines[m.id] ?? emptyMachine(m.id)), ...m }
+    } else if (e.kind === 'session.removed') {
+      delete this.sessions[(e.data as { key: string }).key]
     } else if (e.kind === 'decision.updated') {
       const d = e.data as Decision
       this.decisions[d.id] = d
@@ -60,6 +62,15 @@ class Fleet {
       await new Promise((r) => setTimeout(r, 2500))
     }
     this.messages[key] ??= []
+  }
+
+  /** Not busy and untouched for two days: hidden by default, removable in bulk. */
+  static isStale(s: Session, now = Date.now()): boolean {
+    return s.status !== 'busy' && now - s.updated_at > 48 * 3600 * 1000
+  }
+
+  async cleanup(machine: string, keys?: string[]) {
+    return api.cleanup(machine, keys)
   }
 
   get sessionList(): Session[] {

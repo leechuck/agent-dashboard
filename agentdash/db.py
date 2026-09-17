@@ -325,6 +325,10 @@ class Database:
         await self.db.commit()
         return changed
 
+    async def delete_session(self, key: str) -> None:
+        await self.db.execute("DELETE FROM sessions WHERE key=?", (key,))
+        await self.db.commit()
+
     async def get_session(self, key: str) -> Session | None:
         cur = await self.db.execute("SELECT data FROM sessions WHERE key=?", (key,))
         row = await cur.fetchone()

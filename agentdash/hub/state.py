@@ -185,6 +185,26 @@ class HubState:
                 self._usage_alerted.pop(key, None)
         self.bus.publish("usage.updated", [w.model_dump() for w in windows])
 
+    async def on_session_transition(self, s: Any, old_status: str | None) -> None:
+        """Push when work you dispatched finishes, or a live session starts waiting."""
+        if old_status is None or old_status == s.status:
+            return
+        name = s.name or s.session_id[:8]
+        if s.kind == "background" and old_status == "busy" and s.status in ("done", "idle"):
+            await self.notify(
+                f"{name} finished on {s.machine}",
+                s.last_line[:140] or "background session is done",
+                f"/#/session/{s.key}",
+                tag=f"done-{s.key}",
+            )
+        elif s.status == "failed" and old_status != "failed":
+            await self.notify(
+                f"{name} failed on {s.machine}",
+                s.last_line[:140],
+                f"/#/session/{s.key}",
+                tag=f"fail-{s.key}",
+            )
+
     async def on_node_event(self, machine: str, p: dict[str, Any]) -> None:
         kind = p.get("kind", "")
         if kind in ("claude.permission_prompt", "claude.agent_needs_input") and not p.get("armed"):
@@ -202,9 +222,14 @@ class HubState:
         link = self.node_for(session_key)
         if not link:
             return {"ok": False, "error": "machine offline"}
-        return await self.request(
+        result = await self.request(
             link, HUB_SESSION_ACTION, {"session_key": session_key, "action": action}, timeout=90
         )
+        if action == "rm" and result.get("ok"):
+            await self.db.delete_session(session_key)
+            self.caches.pop(session_key, None)
+            self.bus.publish("session.removed", {"key": session_key})
+        return result
 
     async def session_start(self, machine: str, spec: dict[str, Any]) -> dict[str, Any]:
         link = self.nodes.get(machine)
