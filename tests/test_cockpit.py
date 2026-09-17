@@ -490,3 +490,32 @@ def test_a_session_the_plan_will_not_serve_is_flagged_with_the_way_out():
     assert not [
         x for x in ck.analyse([sess("b", "busy")], M, [], [], now=NOW) if x.kind == "blocked"
     ]
+
+
+async def test_usage_for_a_login_a_machine_no_longer_has_is_dropped(tmp_path):
+    from agentdash.db import Database
+    from agentdash.models import UsageWindow
+
+    db = Database(tmp_path / "hub.db")
+    await db.open()
+
+    def w(account, window, machine="lc-dell", provider="anthropic"):
+        return UsageWindow(
+            provider=provider, account=account, window=window, used_pct=1, machine=machine
+        )
+
+    for x in (
+        w("max · personal", "session"),
+        w("max · personal", "weekly"),
+        w("pro", "week", provider="openai"),
+    ):
+        await db.add_usage(x)
+    fresh = [w("team · BORG", "session"), w("team · BORG", "weekly")]
+    for x in fresh:
+        await db.add_usage(x)
+    await db.forget_gone_accounts("lc-dell", "anthropic", ["team · BORG"])
+    left = {(x.provider, x.account) for x in await db.latest_usage()}
+    assert left == {("anthropic", "team · BORG"), ("openai", "pro")}  # other providers untouched
+    await db.forget_gone_accounts("lc-dell", "anthropic", [])  # a failed poll deletes nothing
+    assert len(await db.latest_usage()) == 3
+    await db.close()

@@ -279,6 +279,19 @@ class Database:
         )
         return [(r["fetched_at"], r["used_pct"]) for r in await cur.fetchall()]
 
+    async def forget_gone_accounts(self, machine: str, provider: str, accounts: list[str]) -> None:
+        """A machine's report is the whole truth for its provider: a login it no longer has
+        (Robert logged in as somebody else) must stop being shown and advised about."""
+        if not accounts:
+            return
+        marks = ",".join("?" * len(accounts))
+        await self.db.execute(
+            f"DELETE FROM usage_snapshots WHERE machine=? AND provider=? "
+            f"AND account NOT IN ({marks})",
+            (machine, provider, *accounts),
+        )
+        await self.db.commit()
+
     async def adopt_legacy_usage(self, provider: str, account: str, plan: str) -> None:
         """Rows written before accounts had names ("" or just the plan) join this account."""
         await self.db.execute(

@@ -229,6 +229,9 @@ class HubState:
         return {"ok": True}
 
     async def usage_snapshot(self, windows: list[UsageWindow]) -> None:
+        by_provider: dict[tuple[str, str], set[str]] = {}
+        for w in windows:
+            by_provider.setdefault((w.machine, w.provider), set()).add(w.account)
         for w in windows:
             if w.provider == "anthropic" and " · " in w.account:
                 await self.db.adopt_legacy_usage(w.provider, w.account, w.account.split(" · ")[0])
@@ -250,6 +253,8 @@ class HubState:
                 )
             elif not level:
                 self._usage_alerted.pop(key, None)
+        for (machine, provider), accounts in by_provider.items():
+            await self.db.forget_gone_accounts(machine, provider, sorted(accounts))
         self.bus.publish("usage.updated", [w.model_dump() for w in windows])
 
     async def on_session_transition(self, s: Any, old_status: str | None) -> None:
