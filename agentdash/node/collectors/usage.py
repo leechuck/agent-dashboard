@@ -24,6 +24,7 @@ from typing import Any
 
 import httpx
 
+from ...config import discover_claude_dirs
 from ...models import UsageWindow, now_ms
 from .claude import account_of
 
@@ -152,7 +153,7 @@ def parse_claude_usage(data: dict[str, Any], account: str) -> list[UsageWindow]:
 class UsageCollector:
     def __init__(self, machine: str, claude_config_dirs: list[Path], state_dir: Path) -> None:
         self.machine = machine
-        self.claude_dirs = [d for d in claude_config_dirs if d.exists()]
+        self.claude_dirs = list(claude_config_dirs)
         self.state_dir = state_dir
         self._claude_version = ""
         self._backoff_until: dict[str, float] = {}
@@ -238,7 +239,9 @@ class UsageCollector:
         """One set of windows per subscription login; two config dirs on one login count once."""
         out: list[UsageWindow] = []
         seen: set[str] = set()
-        for d in self.claude_dirs:
+        # a login added from the dashboard appears on the next poll, not the next restart
+        dirs = dict.fromkeys([*self.claude_dirs, *discover_claude_dirs()])
+        for d in (d for d in dirs if d.exists()):
             acct = account_of(d)
             if acct["provider"] != "anthropic" or not acct["account"] or acct["account"] in seen:
                 continue  # API-key or gateway dirs have no subscription windows
