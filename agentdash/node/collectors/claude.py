@@ -43,7 +43,9 @@ def account_of(config_dir: Path) -> dict[str, str]:
     try:
         cred = json.loads((config_dir / ".credentials.json").read_text())
         plan = str((cred.get("claudeAiOauth") or {}).get("subscriptionType") or "")
-        has_oauth = bool((cred.get("claudeAiOauth") or {}).get("accessToken"))
+        # newer versions keep the tokens elsewhere and leave only the plan in this file
+        oauth = cred.get("claudeAiOauth") or {}
+        has_oauth = bool(oauth.get("accessToken") or oauth.get("subscriptionType"))
     except (OSError, json.JSONDecodeError):
         has_oauth = False
     if not has_oauth:
