@@ -273,7 +273,12 @@ class HubState:
 
     async def on_node_event(self, machine: str, p: dict[str, Any]) -> None:
         kind = p.get("kind", "")
-        if kind in ("claude.permission_prompt", "claude.agent_needs_input") and not p.get("armed"):
+        prompts = (
+            "claude.permission_prompt",
+            "claude.agent_needs_input",
+            "claude.elicitation_dialog",
+        )
+        if kind in prompts and not p.get("armed"):
             key = p.get("session_key", "")
             sess = await self.db.get_session(key)
             where = (sess.name if sess else "") or key.split(":")[-1][:8]

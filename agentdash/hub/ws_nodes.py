@@ -130,6 +130,7 @@ async def nodes_ws(ws: WebSocket) -> None:
                         link.machine, p.get("session_key", ""), p.get("kind", "event"), p
                     )
                     state.bus.publish("event", {"machine": link.machine, **p})
+                    await state.on_node_event(link.machine, p)
             except WebSocketDisconnect:
                 raise
             except Exception:  # noqa: BLE001

@@ -429,3 +429,48 @@ async def test_retention_steps_run_on_a_real_database(tmp_path):
     await db.vacuum()  # used to raise: cannot VACUUM from within a transaction
     assert (await db.titles())["k"]["title"] == "t"
     await db.close()
+
+
+async def test_a_terminal_prompt_on_an_unarmed_machine_pushes():
+    """The hook tells the hub when a dialog is waiting in a terminal it cannot answer for."""
+    from agentdash.hub.state import HubState
+
+    class DB:
+        async def get_session(self, key):
+            return None
+
+        async def list_push_subscriptions(self):
+            return [{"endpoint": "e"}]
+
+        async def remove_push_subscription(self, ep):
+            pass
+
+    class Pusher:
+        enabled = True
+
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, subs, payload):
+            self.sent.append(payload)
+            return []
+
+    st = HubState(DB(), type("B", (), {"publish": lambda *a: None})(), Pusher())
+    for kind in (
+        "claude.permission_prompt",
+        "claude.agent_needs_input",
+        "claude.elicitation_dialog",
+    ):
+        await st.on_node_event(
+            "ws", {"kind": kind, "session_key": "ws:claude:abcdef1234", "armed": False}
+        )
+    assert len(st.pusher.sent) == 3 and "needs you at the terminal" in st.pusher.sent[0]["title"]
+    await st.on_node_event(
+        "ws", {"kind": "claude.permission_prompt", "session_key": "k", "armed": True}
+    )
+    await st.on_node_event(
+        "ws", {"kind": "claude.notification", "session_key": "k", "armed": False}
+    )
+    assert (
+        len(st.pusher.sent) == 3
+    )  # armed goes to the phone as a decision; chatter is not a prompt
