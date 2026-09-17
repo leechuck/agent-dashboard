@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from ..models import now_ms as _now
+from . import blobs
 from . import cockpit as ck
 from .auth import require_web_token
 from .state import HubState, slim
@@ -108,7 +109,7 @@ async def sessions(request: Request, machine: str | None = None, active: bool = 
 
 @router.get("/sessions/{key}")
 async def session(key: str, request: Request):
-    s = await _state(request).db.get_session(key)
+    s = await _state(request).find_session(key)
     if not s:
         raise HTTPException(404, "unknown session")
     return s.model_dump()
@@ -117,7 +118,7 @@ async def session(key: str, request: Request):
 @router.get("/sessions/{key}/messages")
 async def session_messages(key: str, request: Request):
     st = _state(request)
-    s = await st.db.get_session(key)
+    s = await st.find_session(key)
     if not s:
         raise HTTPException(404, "unknown session")
     if not st.caches.get(key):  # nothing yet, or an empty answer from a node that was not ready
@@ -344,7 +345,7 @@ async def _node_call(request: Request, machine: str, type_: str, payload: dict, 
 async def session_commands(key: str, request: Request):
     """Slash commands this session accepts, for completion in the composer."""
     st = _state(request)
-    s = await st.db.get_session(key)
+    s = await st.find_session(key)
     if not s:
         raise HTTPException(404, "unknown session")
     cached = st.commands.get(key)
@@ -438,6 +439,94 @@ async def switch_session(key: str, body: SwitchBody, request: Request):
         t = r["tmux"]
         r["terminal_key"] = f"{machine}:tmux:{t['socket']}:{t['target']}"
     return r
+
+
+@router.get("/past")
+async def past_sessions(
+    request: Request, machine: str = "", harness: str = "", q: str = "", limit: int = 120
+):
+    """Sessions that are over but still on disk, from every online machine (or one):
+    what can be opened, resumed, or moved elsewhere."""
+    st = _state(request)
+    machines = [machine] if machine else sorted(st.nodes)
+    payload = {"harness": harness, "q": q, "limit": limit}
+    results = await asyncio.gather(
+        *(_node_call(request, m, "past.list", payload, timeout=60) for m in machines),
+        return_exceptions=True,
+    )
+    sessions: list[dict] = []
+    errors: dict[str, str] = {}
+    for m, r in zip(machines, results, strict=True):
+        if not isinstance(r, dict) or not r.get("ok"):
+            errors[m] = str(r.get("error") if isinstance(r, dict) else r)[:200]
+            continue
+        sessions += r.get("sessions") or []
+    sessions.sort(key=lambda s: -int(s.get("updated_at") or 0))
+    sessions = sessions[:limit]
+    from ..models import Session
+
+    for raw in sessions:
+        try:
+            st.past[raw["key"]] = Session.model_validate(raw)
+        except ValueError:
+            continue
+    return {"sessions": sessions, "errors": errors}
+
+
+class MoveBody(BaseModel):
+    machine: str  # where it goes
+    cwd: str = ""  # folder there; default the same path
+    backend: str = "default"
+    login: str = ""
+    endpoint: str = ""
+    model: str = ""
+    effort: str = ""
+    permissions: str = "default"
+    note: str = ""
+    stop_old: bool = True
+    force: bool = False
+    name: str = ""
+
+
+@router.post("/sessions/{key}/move")
+async def move_session(key: str, body: MoveBody, request: Request):
+    """Resume a session on another machine: its node packs the transcript, the hub holds
+    the bundle for a moment, the other node files it and starts the agent on it."""
+    st = _state(request)
+    source = key.split(":", 1)[0]
+    if body.machine == source:
+        raise HTTPException(400, "that is the machine it is on")
+    if body.machine not in st.nodes:
+        raise HTTPException(409, f"{body.machine} is offline")
+    exported = await _node_call(
+        request,
+        source,
+        "session.export",
+        {"session_key": key, "stop": body.stop_old, "force": body.force},
+        timeout=900,
+    )
+    if not exported.get("ok"):
+        return exported
+    blob = str(exported.get("blob") or "")
+    try:
+        spec = {
+            **body.model_dump(),
+            "harness": exported["harness"],
+            "session_id": exported["session_id"],
+            "cwd": body.cwd or exported.get("cwd") or "",
+            "blob": blob,
+            "mode": "tmux",
+            "name": body.name or exported.get("name") or "",
+        }
+        imported = await _node_call(request, body.machine, "session.import", spec, timeout=900)
+    finally:
+        blobs.remove(request.app.state.settings.state_dir, blob)
+    if imported.get("ok") and imported.get("tmux"):
+        t = imported["tmux"]
+        imported["terminal_key"] = f"{body.machine}:tmux:{t['socket']}:{t['target']}"
+    imported["stopped"] = bool(exported.get("stopped"))
+    imported["source"] = source
+    return imported
 
 
 class TitleBody(BaseModel):

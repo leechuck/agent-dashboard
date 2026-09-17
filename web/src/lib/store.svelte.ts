@@ -129,6 +129,18 @@ export class Fleet {
     }
   }
 
+  /** A session opened by key that the roster never listed (one that is over, from the
+      past-sessions list or an old link): fetched once and kept like the others. */
+  async ensureSession(key: string) {
+    if (this.sessions[key]) return
+    try {
+      const s = await api.session(key)
+      if (!this.sessions[key]) this.sessions[key] = s
+    } catch {
+      /* the view says it is unknown */
+    }
+  }
+
   /** Session keys whose transcript is being fetched right now. */
   loadingMessages = $state<Record<string, boolean>>({})
   private inflight = new Map<string, Promise<void>>()

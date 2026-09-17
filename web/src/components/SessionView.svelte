@@ -7,6 +7,7 @@
   import SessionActions from './SessionActions.svelte'
   import SessionSwitcher from './SessionSwitcher.svelte'
   import SwitchPanel from './SwitchPanel.svelte'
+  import MovePanel from './MovePanel.svelte'
 
   let { key }: { key: string } = $props()
   const session = $derived(fleet.sessions[key])
@@ -17,6 +18,22 @@
   const parent = $derived(x.parent ? fleet.sessions[x.parent] : undefined)
   let showThinking = $state(false)
   let switching = $state(false)
+  let moving = $state(false)
+  let resumeMsg = $state('')
+  const live = $derived(!!session && ['busy', 'idle', 'waiting'].includes(session.status))
+  const resumable = $derived(!!session && ['claude', 'codex', 'pi'].includes(session.harness))
+  const elsewhere = $derived(Object.values(fleet.machines).some((m) => m.online && session && m.id !== session.machine))
+  /** Start this conversation again where it is, with the same agent and settings. */
+  async function resume() {
+    if (!session) return
+    resumeMsg = 'Resuming…'
+    try {
+      const r = await api.switchSession(key, { harness: session.harness })
+      resumeMsg = r.ok ? `Resumed in tmux (${r.attach}); the card comes back to the board shortly.` : r.error ?? 'failed'
+    } catch (e) {
+      resumeMsg = String(e)
+    }
+  }
   let renaming = $state(false)
   let newTitle = $state('')
   let titleBusy = $state(false)
@@ -45,7 +62,11 @@
 
   $effect(() => {
     key
+    fleet.ensureSession(key)
     fleet.openSession(key)
+    // "#/session/<key>?move=1" opens the move panel (from the History page)
+    moving = new URLSearchParams(location.hash.split('?')[1] ?? '').get('move') === '1'
+    resumeMsg = ''
   })
 
   $effect(() => {
@@ -132,8 +153,15 @@
       {#if typeof x.cost_usd === 'number'}<span title="API-price equivalent of this session">≈ ${x.cost_usd.toFixed(2)}</span>{/if}
       {#if parent}<a href={`#/session/${encodeURIComponent(parent.key)}`}>sub-agent of {displayName(parent)}</a>{/if}
     </div>
-    <div class="actrow"><SessionActions {session} /><button class="swbtn" onclick={() => (switching = !switching)}>Switch agent / model…</button></div>
+    <div class="actrow">
+      <SessionActions {session} />
+      {#if resumable && !live}<button class="swbtn primary" onclick={resume} disabled={resumeMsg.startsWith('Resuming')}>Resume here</button>{/if}
+      {#if resumable}<button class="swbtn" onclick={() => { switching = !switching; if (switching) moving = false }}>{live ? 'Switch agent / model…' : 'Resume with another agent / model…'}</button>{/if}
+      {#if resumable && elsewhere}<button class="swbtn" onclick={() => { moving = !moving; if (moving) switching = false }}>Move to another machine…</button>{/if}
+    </div>
+    {#if resumeMsg}<p class="small" class:okmsg={!resumeMsg.startsWith('Resuming') && resumeMsg.startsWith('Resumed')}>{resumeMsg}</p>{/if}
     {#if switching}<SwitchPanel {session} onclose={() => (switching = false)} />{/if}
+    {#if moving}<MovePanel {session} onclose={() => (moving = false)} />{/if}
     <div class="tools small">
       <label><input type="checkbox" bind:checked={showThinking} /> thinking</label>
       <label><input type="checkbox" bind:checked={showMeta} /> system context</label>
@@ -169,6 +197,7 @@
   .rename button { font-size: 13px; padding: 3px 10px; }
   .actrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .swbtn { font-size: 13px; padding: 4px 10px; }
+  .okmsg { color: var(--moss); }
   .goal { margin-top: 4px; padding: 5px 8px; background: var(--cobalt-soft); border-radius: var(--radius); max-height: 5.8em; overflow: auto; }
   .head {
     position: sticky;

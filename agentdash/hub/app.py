@@ -15,6 +15,7 @@ from ..config import get_settings
 from ..db import Database
 from .api import router as api_router
 from .auth import COOKIE
+from .blobs import router as blob_router
 from .bus import EventBus
 from .clientguard import ClientGuard
 from .history_proxy import router as history_router
@@ -96,6 +97,7 @@ def create_app() -> FastAPI:
     app.include_router(ws_router)
     app.include_router(history_router)
     app.include_router(terminal_router)
+    app.include_router(blob_router)
 
     @app.post("/login")
     async def login(request: Request) -> Response:

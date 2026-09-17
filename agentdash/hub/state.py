@@ -83,10 +83,16 @@ class HubState:
         self.briefer = Briefer()
         self.commands: dict[str, dict[str, Any]] = {}  # session key -> its slash commands
         self.titler = Titler()
+        # sessions that are over but still on a machine's disk, as last listed by its node
+        self.past: dict[str, Any] = {}
 
     def node_for(self, session_key: str) -> NodeLink | None:
         machine = session_key.split(":", 1)[0]
         return self.nodes.get(machine)
+
+    async def find_session(self, key: str) -> Any | None:
+        """Stored by the roster, or listed among a machine's past sessions."""
+        return await self.db.get_session(key) or self.past.get(key)
 
     async def ensure_subscribed(self, session_key: str) -> None:
         link = self.node_for(session_key)

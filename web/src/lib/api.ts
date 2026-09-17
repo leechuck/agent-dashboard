@@ -48,8 +48,14 @@ export const api = {
   saveEndpoints: (endpoints: Endpoint[]) => j<{ ok: boolean }>('/api/settings/endpoints', { method: 'PUT', body: JSON.stringify({ endpoints }) }),
   openLogin: (machine: string, name: string) =>
     j<{ ok: boolean; error?: string; terminal_key?: string; attach?: string }>(`/api/machines/${encodeURIComponent(machine)}/logins`, { method: 'POST', body: JSON.stringify({ name }) }),
-  switchSession: (key: string, body: Partial<AgentChoice> & { note?: string; force?: boolean; stop_old?: boolean }) =>
-    j<{ ok: boolean; error?: string; resumed?: boolean; attach?: string; terminal_key?: string }>(`/api/sessions/${encodeURIComponent(key)}/switch`, { method: 'POST', body: JSON.stringify(body) }),
+  switchSession: (key: string, body: Partial<AgentChoice> & { note?: string; force?: boolean; stop_old?: boolean; cwd?: string }) =>
+    j<{ ok: boolean; error?: string; resumed?: boolean; attach?: string; terminal_key?: string; session_key?: string }>(`/api/sessions/${encodeURIComponent(key)}/switch`, { method: 'POST', body: JSON.stringify(body) }),
+  past: (params: { machine?: string; harness?: string; q?: string; limit?: number } = {}) =>
+    j<{ sessions: Session[]; errors: Record<string, string> }>(
+      `/api/past?${new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])))}`,
+    ),
+  moveSession: (key: string, body: Partial<AgentChoice> & { machine: string; cwd?: string; note?: string; stop_old?: boolean; force?: boolean; name?: string }) =>
+    j<{ ok: boolean; error?: string; attach?: string; terminal_key?: string; session_key?: string; stopped?: boolean; source?: string }>(`/api/sessions/${encodeURIComponent(key)}/move`, { method: 'POST', body: JSON.stringify(body) }),
   setTitle: (key: string, title: string) => j<{ ok: boolean; title: string }>(`/api/sessions/${encodeURIComponent(key)}/title`, { method: 'PUT', body: JSON.stringify({ title }) }),
   regenerateTitle: (key: string) => j<{ ok: boolean; title: string }>(`/api/sessions/${encodeURIComponent(key)}/title/regenerate`, { method: 'POST', body: '{}' }),
   regenerateTitles: () => j<{ ok: boolean; renamed: number }>('/api/titles/regenerate', { method: 'POST', body: '{}' }),

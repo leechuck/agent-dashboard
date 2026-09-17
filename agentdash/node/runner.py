@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import platform
+import secrets
+import time
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 from .. import __version__
 from ..config import Settings, discover_claude_dirs
@@ -37,7 +42,7 @@ from ..models import (
     SessionStatus,
     now_ms,
 )
-from . import briefing, commands
+from . import briefing, commands, past
 from .adapters import codex_rollout, hermes_state, opencode_store, pi_session
 from .adapters.claude_cli import job_action, kill_process
 from .adapters.claude_socket import SocketSendError, send_user_message
@@ -65,6 +70,7 @@ from .launcher import (
 )
 from .lineage import link_parents
 from .pa import PersonalAssistant
+from .past import TransferError
 from .terminal import TerminalSession
 
 log = logging.getLogger(__name__)
@@ -136,6 +142,12 @@ class Node:
             self._spawn(self.login_open(p))
         elif frame.type == "session.switch":
             self._spawn(self.session_switch(p))
+        elif frame.type == "past.list":
+            self._spawn(self.past_list(p))
+        elif frame.type == "session.export":
+            self._spawn(self.session_export(p))
+        elif frame.type == "session.import":
+            self._spawn(self.session_import(p))
         elif frame.type == "terminal.open":
             await self.terminal_open(p)
         elif frame.type == "cockpit.brief":
@@ -266,8 +278,12 @@ class Node:
     async def subscribe(self, key: str) -> None:
         sess = self.sessions.get(key)
         if not sess:
-            # asked before the first roster was collected (right after a reconnect): answer
-            # when the session is known, never with an empty transcript that would be cached
+            # not running: its transcript may still be on disk (a past session being read,
+            # or a live one asked for right after a reconnect, before the first roster)
+            sess = await asyncio.to_thread(self.find_past, key)
+        if not sess:
+            # answer when the session is known, never with an empty transcript that would
+            # be cached
             self.pending_subs.add(key)
             return
         self.pending_subs.discard(key)
@@ -538,20 +554,23 @@ class Node:
 
     async def login_open(self, p: dict[str, Any]) -> None:
         """Create (if needed) a Claude login directory and open Claude on it in tmux, so the
-        owner can run /login there from the dashboard's terminal."""
+        owner can run /login there from the dashboard's terminal. The name `default` is the
+        main ~/.claude login (for when it expired)."""
         try:
             name = str(p.get("name") or "")
-            done = await asyncio.to_thread(install_account, name)
+            main = name in ("", "default", ".claude")
+            done = [] if main else await asyncio.to_thread(install_account, name)
             self.s.claude_config_dirs = discover_claude_dirs()
             self.claude.config_dirs = [d for d in self.s.claude_config_dirs if d.exists()]
             spec = LaunchSpec(
                 harness="claude",
                 cwd=str(Path.home()),
-                backend="login",
-                login=f".claude-{name}",
-                name=f"login-{name}",
+                backend="default" if main else "login",
+                login="" if main else f".claude-{name}",
+                name=f"login-{name or 'default'}",
             )
-            fresh = not (Path.home() / f".claude-{name}" / ".credentials.json").exists()
+            config = Path.home() / (".claude" if main else f".claude-{name}")
+            fresh = not _credentials_alive(config / ".credentials.json")
             result = await launch(spec, self.s, [])
             if result.get("ok") and result.get("tmux") and not fresh:
                 # an empty slot asks by itself; a slot that is already logged in needs the
@@ -590,15 +609,155 @@ class Node:
             kill_process(sess.pid, hard=True)
             await asyncio.sleep(0.5)
 
+    def find_past(self, key: str) -> Session | None:
+        """A session that is not running, from what its harness keeps on disk."""
+        try:
+            machine, harness, sid = key.split(":", 2)
+        except ValueError:
+            return None
+        if machine != self.machine or not sid:
+            return None
+        if harness == "claude":
+            return past.find_claude(self.machine, self.claude.config_dirs, sid)
+        if harness == "codex":
+            t = self.codex._thread(sid)
+            return past.codex_session(self.machine, t, self.codex.home) if t else None
+        if harness == "pi":
+            return past.find_pi(self.machine, self.pi.dir, sid)
+        return None
+
+    async def locate(self, key: str) -> Session | None:
+        """Running, or on disk."""
+        return self.sessions.get(key) or await asyncio.to_thread(self.find_past, key)
+
+    async def past_list(self, p: dict[str, Any]) -> None:
+        """Sessions this machine could resume, newest first."""
+        harness = str(p.get("harness") or "")
+        limit = min(int(p.get("limit") or 120), 500)
+        q = str(p.get("q") or "")
+        found: list[Session] = []
+        try:
+            if harness in ("", "claude"):
+                found += await asyncio.to_thread(
+                    past.list_claude, self.machine, self.claude.config_dirs, limit
+                )
+            if harness in ("", "codex"):
+                rows = await asyncio.to_thread(self.codex._query, "1=1", ())
+                found += [past.codex_session(self.machine, t, self.codex.home) for t in rows]
+            if harness in ("", "pi"):
+                found += await asyncio.to_thread(past.list_pi, self.machine, self.pi.dir, limit)
+            live = {k for k, s in self.sessions.items() if s.status in ("busy", "idle", "waiting")}
+            found = [s for s in found if s.key not in live and past.matches(s, q)]
+            found.sort(key=lambda s: -s.updated_at)
+            result: dict[str, Any] = {
+                "ok": True,
+                "sessions": [s.model_dump() for s in found[:limit]],
+            }
+        except Exception as e:  # noqa: BLE001
+            log.exception("listing past sessions failed")
+            result = {"ok": False, "error": f"{e.__class__.__name__}: {e}"[:300]}
+        await self._reply("past.result", p, result)
+
+    def _hub_http(self) -> str:
+        base = self.s.hub_url.rsplit("/nodes", 1)[0]
+        return "http" + base[2:] if base.startswith("ws") else base
+
+    async def session_export(self, p: dict[str, Any]) -> None:
+        """Pack a session's transcript and hand it to the hub for another machine."""
+        bundle: Path | None = None
+        try:
+            sess = await self.locate(p.get("session_key", ""))
+            if not sess:
+                raise TransferError("unknown session")
+            live = sess.status in ("busy", "idle", "waiting") and sess.pid
+            if live and sess.status == "busy" and not p.get("force"):
+                raise TransferError(
+                    "the session is working; wait for it to finish its turn, or force"
+                )
+            if live and p.get("stop", True):
+                await self._stop(sess)  # two agents must never write to one transcript
+            bundle, meta = await asyncio.to_thread(past.pack, sess, self.s.state_dir / "transfer")
+            blob = secrets.token_hex(16)
+            async with httpx.AsyncClient(timeout=600) as client:
+                with bundle.open("rb") as f:
+                    r = await client.put(
+                        f"{self._hub_http()}/nodes/blob/{blob}",
+                        content=f,
+                        headers={"Authorization": f"Bearer {self.s.node_token}"},
+                    )
+            if r.status_code >= 300:
+                raise TransferError(f"hub refused the bundle: {r.status_code} {r.text[:120]}")
+            result = {"ok": True, "blob": blob, "stopped": bool(live), **meta}
+            result["extra"] = {
+                k: sess.extra[k] for k in ("config_dir", "account", "first_user") if k in sess.extra
+            }
+        except (TransferError, LaunchError, httpx.HTTPError, OSError) as e:
+            result = {"ok": False, "error": str(e)[:300]}
+        finally:
+            if bundle:
+                bundle.unlink(missing_ok=True)
+        self._refresh.set()
+        await self._reply("export.result", p, result)
+
+    async def session_import(self, p: dict[str, Any]) -> None:
+        """Fetch a bundle from the hub, file it where the harness looks, and resume it."""
+        bundle = self.s.state_dir / "transfer" / f"in-{secrets.token_hex(8)}.tgz"
+        try:
+            harness, sid = str(p.get("harness") or ""), str(p.get("session_id") or "")
+            if harness not in past.RESUMABLE or not sid:
+                raise TransferError(f"{harness or 'this'} sessions cannot be resumed here")
+            self.s.claude_config_dirs = discover_claude_dirs()
+            spec = LaunchSpec.parse({**p, "harness": harness, "resume": sid})
+            spec.prompt = str(p.get("note") or "")
+            if not Path(spec.cwd).expanduser().is_dir():
+                raise TransferError(
+                    f"{spec.cwd} does not exist on {self.machine}: clone or create it there"
+                    " first, or pick another folder"
+                )
+            if harness == "claude":
+                root = (
+                    claude_config_dir(self.s, spec.login)
+                    if spec.backend == "login" and spec.login
+                    else Path.home() / ".claude"
+                )
+            elif harness == "codex":
+                root = self.codex.home
+            else:
+                root = self.pi.dir
+            bundle.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            async with httpx.AsyncClient(timeout=600) as client:
+                async with client.stream(
+                    "GET",
+                    f"{self._hub_http()}/nodes/blob/{p.get('blob', '')}",
+                    headers={"Authorization": f"Bearer {self.s.node_token}"},
+                ) as r:
+                    if r.status_code >= 300:
+                        raise TransferError(f"the hub has no such bundle ({r.status_code})")
+                    with bundle.open("wb") as f:
+                        async for chunk in r.aiter_bytes():
+                            f.write(chunk)
+            path = await asyncio.to_thread(past.unpack, bundle, harness, sid, spec.cwd, root)
+            if harness == "pi":
+                spec.resume = str(path)  # pi resumes by file
+            result = await launch(spec, self.s, self._endpoints(p))
+            result["session_key"] = Session.make_key(self.machine, harness, sid)
+            result["transcript_path"] = str(path)
+        except (TransferError, LaunchError, httpx.HTTPError, OSError, ValueError) as e:
+            result = {"ok": False, "error": str(e)[:300]}
+        finally:
+            bundle.unlink(missing_ok=True)
+        self._refresh.set()
+        await self._reply("import.result", p, result)
+
     async def _switch(self, p: dict[str, Any]) -> dict[str, Any]:
-        sess = self.sessions.get(p.get("session_key", ""))
+        sess = await self.locate(p.get("session_key", ""))
         if not sess:
             raise LaunchError("unknown session")
         if sess.harness not in ("claude", "codex", "pi"):
             raise LaunchError(f"{sess.harness} sessions cannot be restarted from here")
         self.s.claude_config_dirs = discover_claude_dirs()
         target = LaunchSpec.parse(
-            {**p, "cwd": sess.cwd, "harness": p.get("harness") or sess.harness}
+            {**p, "cwd": p.get("cwd") or sess.cwd, "harness": p.get("harness") or sess.harness}
         )
         same_harness = target.harness == sess.harness
         if same_harness:
@@ -615,19 +774,24 @@ class Node:
                         f"{target.login} does not share transcripts with {old_dir.name}; "
                         "create it with `agentdash install account` so a session can move over"
                     )
-            target.resume = sess.session_id
+            # pi resumes by file; the others by id
+            target.resume = sess.transcript_path if sess.harness == "pi" else sess.session_id
             target.prompt = str(p.get("note") or "")
             target.name = target.name or sess.name
-            await self._stop(sess)
+            if sess.pid:
+                await self._stop(sess)
         else:
             # another harness cannot load the conversation: it gets a briefing and the transcript
             note = str(p.get("note") or "").strip()
             target.name = target.name or f"{Path(sess.cwd).name}-handover"
             target.prompt = handover_prompt(sess, note)
-            if p.get("stop_old"):
+            if p.get("stop_old") and sess.pid:
                 await self._stop(sess)
         result = await launch(target, self.s, self._endpoints(p))
         result["resumed"] = same_harness
+        result["session_key"] = (
+            Session.make_key(self.machine, target.harness, sess.session_id) if same_harness else ""
+        )
         return result
 
     # loops ------------------------------------------------------------
@@ -780,6 +944,20 @@ class Node:
             self.pa_reminder_loop(),
             serve_hooks(self, self.s.node_host, self.s.node_port),
         )
+
+
+def _credentials_alive(path: Path) -> bool:
+    """Whether a Claude login can still be used: a token that expired makes Claude ask
+    to log in by itself, like an empty slot does."""
+    try:
+        oauth = json.loads(path.read_text()).get("claudeAiOauth") or {}
+    except (OSError, ValueError, AttributeError):
+        return False
+    if not (oauth.get("accessToken") or oauth.get("refreshToken")):
+        return False
+    exp = int(oauth.get("expiresAt") or 0)
+    # a stale access token is refreshed with the refresh token; only a dead one is fresh
+    return bool(oauth.get("refreshToken")) or exp > time.time() * 1000
 
 
 def _decision_reply(behavior: str, reason: str = "") -> dict[str, Any]:
