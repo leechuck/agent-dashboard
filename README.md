@@ -44,7 +44,12 @@ What it does:
   side by side: `agentdash install account team`, then `claude-team` and
   `/login`; the cockpit says which login should take new work), Codex windows, OpenRouter credits
   and key cap, with reset countdowns and push at 80/95 %.
-- **History**: search every past session (agentsview) and resume it.
+- **History**: every past session of every machine, read from what the
+  harnesses keep on disk (Claude `projects/`, Codex threads, pi files), named by
+  their own titles. Open one, resume it in tmux where it is, or **move it to
+  another machine**: the transcript travels through the hub and the same
+  conversation continues there with `--resume` (ADR 0008). agentsview adds
+  full-text search when configured.
 
 What it reuses: [agentsview](https://www.agentsview.io/) for history and
 analytics; Claude Remote Control and Codex remote control for deep interaction
