@@ -73,8 +73,16 @@ def create_app() -> FastAPI:
         if settings.web_token and body.get("token") != settings.web_token:
             return JSONResponse({"ok": False}, status_code=401)
         resp = JSONResponse({"ok": True})
+        secure = (
+            request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+        )
         resp.set_cookie(
-            COOKIE, body.get("token", ""), httponly=True, samesite="lax", max_age=60 * 60 * 24 * 365
+            COOKIE,
+            body.get("token", ""),
+            httponly=True,
+            secure=secure,
+            samesite="none" if secure else "lax",
+            max_age=60 * 60 * 24 * 365,
         )
         return resp
 

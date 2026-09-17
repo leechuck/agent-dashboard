@@ -118,8 +118,8 @@ async def session_messages(key: str, request: Request):
         raise HTTPException(404, "unknown session")
     if key not in st.caches:
         await st.ensure_subscribed(key)
-        # wait briefly for the node's initial batch
-        for _ in range(30):
+        # wait for the node's initial batch (large transcripts take a few seconds to parse)
+        for _ in range(120):
             if key in st.caches:
                 break
             await asyncio.sleep(0.1)

@@ -56,6 +56,14 @@ def node(
     asyncio.run(run_node(s))
 
 
+@app.command()
+def doctor() -> None:
+    """Check hooks, tokens, node, hub, Tailscale and history on this machine."""
+    from .doctor import main as doctor_main
+
+    raise typer.Exit(doctor_main(get_settings()))
+
+
 install_app = typer.Typer(help="Install hooks and services on this machine.")
 app.add_typer(install_app, name="install")
 

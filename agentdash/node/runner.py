@@ -34,13 +34,14 @@ from ..models import (
     SessionStatus,
     now_ms,
 )
-from .adapters import codex_rollout, opencode_store, pi_session
+from .adapters import codex_rollout, hermes_state, opencode_store, pi_session
 from .adapters.claude_cli import job_action, kill_process, start_background
 from .adapters.claude_socket import SocketSendError, send_user_message
 from .adapters.claude_transcript import TranscriptTail, read_last
 from .adapters.claude_transcript import iter_messages as claude_iter
 from .collectors.claude import ClaudeCollector
 from .collectors.codex import CodexCollector
+from .collectors.hermes import HermesCollector
 from .collectors.opencode import OpencodeCollector
 from .collectors.pi import PiCollector
 from .collectors.tmux import TmuxCollector
@@ -63,11 +64,13 @@ class Node:
         self.codex = CodexCollector(self.machine)
         self.pi = PiCollector(self.machine)
         self.opencode = OpencodeCollector(self.machine)
+        self.hermes = HermesCollector(self.machine)
         self.tmux = TmuxCollector(self.machine)
         self.usage = UsageCollector(self.machine, settings.claude_config_dirs, settings.state_dir)
         self.pi_inbox: dict[str, asyncio.Queue[str]] = {}  # pi session_id -> prompts to deliver
         self.terminals: dict[str, TerminalSession] = {}
         self.opencode_seen: dict[str, set[str]] = {}
+        self.hermes_last: dict[str, int] = {}  # session key -> last message id sent
         self.sessions: dict[str, Session] = {}
         self.tails: dict[str, TranscriptTail] = {}
         self.hub = HubClient(settings.hub_url, settings.node_token, self.on_hub_frame)
@@ -94,6 +97,8 @@ class Node:
             await self.subscribe(p.get("session_key", ""))
         elif frame.type == HUB_UNSUBSCRIBE:
             self.tails.pop(p.get("session_key", ""), None)
+            self.hermes_last.pop(p.get("session_key", ""), None)
+            self.opencode_seen.pop(p.get("session_key", ""), None)
         elif frame.type == HUB_SEND_PROMPT:
             await self.send_prompt(
                 p.get("session_key", ""), p.get("text", ""), p.get("request_id", "")
@@ -229,6 +234,20 @@ class Node:
         sess = self.sessions.get(key)
         if not sess or not sess.transcript_path:
             await self.hub.send(NODE_MESSAGES, {"session_key": key, "messages": [], "reset": True})
+            return
+        if sess.harness == "hermes":
+            msgs = await asyncio.to_thread(
+                hermes_state.messages,
+                Path(sess.transcript_path),
+                sess.session_id,
+                0,
+                self.s.tail_lines,
+            )
+            self.hermes_last[key] = max((int(m.id.split(":")[0]) for m in msgs), default=0)
+            await self.hub.send(
+                NODE_MESSAGES,
+                {"session_key": key, "messages": [m.model_dump() for m in msgs], "reset": True},
+            )
             return
         if sess.harness == "opencode":
             msgs = await asyncio.to_thread(
@@ -421,7 +440,7 @@ class Node:
         while True:
             try:
                 sessions = await self.claude.collect()
-                for coll in (self.codex, self.pi, self.opencode):
+                for coll in (self.codex, self.pi, self.opencode, self.hermes):
                     try:
                         sessions += await asyncio.to_thread(coll.collect)
                     except Exception:  # noqa: BLE001
@@ -446,6 +465,23 @@ class Node:
         while True:
             tick += 1
             if tick % 5 == 0:
+                for key, last_id in list(self.hermes_last.items()):
+                    sess = self.sessions.get(key)
+                    if not sess:
+                        continue
+                    new = await asyncio.to_thread(
+                        hermes_state.messages,
+                        Path(sess.transcript_path),
+                        sess.session_id,
+                        last_id,
+                        200,
+                    )
+                    if new:
+                        self.hermes_last[key] = max(int(m.id.split(":")[0]) for m in new)
+                        await self.hub.send(
+                            NODE_MESSAGES,
+                            {"session_key": key, "messages": [m.model_dump() for m in new]},
+                        )
                 for key, seen in list(self.opencode_seen.items()):
                     sess = self.sessions.get(key)
                     if not sess:
@@ -504,7 +540,7 @@ class Node:
                 "id": self.machine,
                 "hostname": platform.node(),
                 "os": f"{platform.system()} {platform.release()}",
-                "harnesses": ["claude", "codex", "pi", "opencode", "tmux"],
+                "harnesses": ["claude", "codex", "pi", "opencode", "hermes", "tmux"],
                 "node_version": __version__,
             }
         }

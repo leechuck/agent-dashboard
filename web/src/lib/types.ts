@@ -3,7 +3,7 @@ export type Status = 'busy' | 'idle' | 'waiting' | 'done' | 'failed' | 'stopped'
 export interface Session {
   key: string
   machine: string
-  harness: 'claude' | 'codex' | 'pi' | 'opencode' | 'tmux'
+  harness: 'claude' | 'codex' | 'pi' | 'opencode' | 'hermes' | 'tmux'
   provider: string
   session_id: string
   name: string

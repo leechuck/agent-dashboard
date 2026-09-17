@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>phone QA</title>
+<style>body{margin:0;background:#333;display:flex;gap:24px;padding:16px;font-family:sans-serif;color:#ddd}
+iframe{width:412px;height:915px;border:0;background:#fff;border-radius:12px}.col{display:flex;flex-direction:column;gap:6px}</style></head>
+<body><div class="col"><span id="l1"></span><iframe id="a"></iframe></div><div class="col"><span id="l2"></span><iframe id="b"></iframe></div>
+<script>
+// Same-origin phone-width preview of two routes: /qa/phone.html#<routeA>|<routeB>
+function go(){const [a,b]=(location.hash.slice(1)||'/|/limits').split('|');
+ document.getElementById('a').src='/#'+a; document.getElementById('b').src='/#'+b;
+ document.getElementById('l1').textContent=a; document.getElementById('l2').textContent=b;}
+window.addEventListener('hashchange',go); go();
+</script></body></html>

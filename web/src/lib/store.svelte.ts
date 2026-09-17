@@ -50,10 +50,16 @@ class Fleet {
   }
 
   async openSession(key: string) {
-    if (!this.messages[key]) {
+    if (this.messages[key]?.length) return
+    for (let attempt = 0; attempt < 4; attempt++) {
       const msgs = await api.messages(key)
-      if (!this.messages[key]) this.messages[key] = msgs
+      if (msgs.length || this.messages[key]?.length) {
+        if (!this.messages[key]?.length) this.messages[key] = msgs
+        return
+      }
+      await new Promise((r) => setTimeout(r, 2500))
     }
+    this.messages[key] ??= []
   }
 
   get sessionList(): Session[] {
@@ -66,9 +72,11 @@ class Fleet {
     return this.sessionList.filter((s) => s.status === 'waiting' && s.updated_at > cutoff)
   }
 
-  /** The most-used window, for the header badge. */
+  /** The most-used subscription window (session/week), for the header badge. Money is not a window. */
   get worstUsage(): UsageWindow | null {
-    return this.usage.reduce<UsageWindow | null>((w, u) => (!w || u.used_pct > w.used_pct ? u : w), null)
+    return this.usage
+      .filter((u) => (u.provider === 'anthropic' || u.provider === 'openai') && u.window !== 'extra_usage')
+      .reduce<UsageWindow | null>((w, u) => (!w || u.used_pct > w.used_pct ? u : w), null)
   }
 
   get pendingDecisions(): Decision[] {

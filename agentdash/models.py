@@ -18,6 +18,7 @@ class Harness(StrEnum):
     codex = "codex"
     pi = "pi"
     opencode = "opencode"
+    hermes = "hermes"
     tmux = "tmux"
 
 

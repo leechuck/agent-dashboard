@@ -90,4 +90,8 @@ def agent_in_tree(pid: int) -> tuple[str, int] | None:
             b1 = os.path.basename(argv[1])
             if b1 in AGENT_BINARIES:
                 return b1, p
+        if base.startswith("python") and any("hermes_cli" in a for a in argv[1:4]):
+            if "gateway" in argv:  # the messaging gateway is a service, not a session
+                continue
+            return "hermes", p
     return None
