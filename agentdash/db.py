@@ -306,6 +306,10 @@ class Database:
         )
         await self.db.commit()
 
+    async def delete_title(self, key: str) -> None:
+        await self.db.execute("DELETE FROM titles WHERE key=?", (key,))
+        await self.db.commit()
+
     async def prune_titles(self, keep_ms: int) -> None:
         await self.db.execute("DELETE FROM titles WHERE at < ?", (now_ms() - keep_ms,))
         await self.db.commit()
@@ -420,6 +424,12 @@ class Database:
             )
         await self.db.commit()
         return changed
+
+    async def update_session(self, s: Session) -> None:
+        await self.db.execute(
+            "UPDATE sessions SET data=? WHERE key=?", (s.model_dump_json(), s.key)
+        )
+        await self.db.commit()
 
     async def delete_session(self, key: str) -> None:
         await self.db.execute("DELETE FROM sessions WHERE key=?", (key,))

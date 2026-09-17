@@ -727,10 +727,17 @@ def parse_briefing(text: str) -> dict[str, Any]:
     }
 
 
+async def endpoints_setting(db: Any) -> list[dict[str, Any]]:
+    """The owner's model endpoints (addresses and the NAME of the key variable, no keys)."""
+    stored = await db.get_setting("endpoints")
+    return stored["list"] if isinstance(stored.get("list"), list) else DEFAULT_ENDPOINTS
+
+
 async def ask_model(
     state: Any, system: str, digest: dict[str, Any], agent: dict[str, Any], prefer: str = ""
 ) -> dict[str, Any]:
     """Run one model call on a node (the preferred machine first). Raises RuntimeError."""
+    endpoints = await endpoints_setting(state.db)
     order = sorted(state.nodes, key=lambda m: (m != (agent.get("machine") or prefer), m))
     if not order:
         raise RuntimeError("no machine is online to run the model")
@@ -739,7 +746,7 @@ async def ask_model(
         res = await state.request(
             state.nodes[machine],
             "cockpit.brief",
-            {"system": system, "digest": digest, "agent": agent},
+            {"system": system, "digest": digest, "agent": agent, "endpoints": endpoints},
             timeout=180,
         )
         if res.get("ok"):
@@ -749,8 +756,35 @@ async def ask_model(
     raise RuntimeError(last)
 
 
+DEFAULT_ENDPOINTS: list[dict[str, Any]] = [
+    {
+        "id": "openrouter",
+        "name": "OpenRouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "anthropic_base_url": "https://openrouter.ai/api",
+        "key_env": "OPENROUTER_API_KEY",
+        "wire_api": "chat",
+    },
+    {
+        "id": "borg",
+        "name": "BORG Qwen (unimatrix01)",
+        "base_url": "http://unimatrix01.kaust.edu.sa:8000/v1",
+        "anthropic_base_url": "http://unimatrix01.kaust.edu.sa:8000",
+        "key_env": "BORG_LLM_API_KEY",
+        "wire_api": "responses",
+        "context_window": 131072,
+    },
+]
+
 AGENT_DEFAULTS: dict[str, dict[str, Any]] = {
-    "advice": {"machine": "", "harness": "claude", "model": "sonnet", "login": "", "effort": "low"},
+    "advice": {
+        "machine": "",
+        "harness": "claude",  # claude | codex | api
+        "model": "sonnet",
+        "login": "",
+        "endpoint": "",  # for harness api: which configured endpoint
+        "effort": "low",
+    },
     "personal": {"machine": "", "model": "", "login": ""},
     "titles": {"enabled": True, "model": "haiku"},
 }
@@ -810,8 +844,9 @@ class Briefer:
 
 
 TITLE_PROMPT = """You name coding-agent sessions for a dashboard. The JSON lists sessions with the \
-first request of the session, the latest request, an optional standing goal, the working directory and \
-the last output. Give each a title that tells the owner at a glance what the work is about NOW.
+first request of the session, the latest request, an optional standing goal, the working directory, \
+the last output, and the title the harness itself shows (Codex writes decent ones; Claude's are mostly \
+the folder name plus a suffix). Keep a harness title that already says what the work is. Give each a title that tells the owner at a glance what the work is about NOW.
 
 Rules: 3 to 7 words. Name the concrete subject (which paper, feature, bug, dataset, benchmark, review), \
 not the tool and not filler like "working on" or "session". If the latest request moved to a new topic, \
@@ -835,6 +870,9 @@ def parse_titles(text: str, allowed: set[str]) -> dict[str, str]:
         if key in allowed and clean:
             out[key] = clean
     return out
+
+
+MANUAL = "manual"
 
 
 class Titler:
@@ -867,18 +905,37 @@ class Titler:
             for s in await state.db.list_sessions(active_only=True)
             if s.harness != "tmux" and not s.extra.get("parent") and not is_stale(s, now)
         ]
-        todo = [s for s in live if title_basis(s) and self.basis.get(s.key) != title_basis(s)]
+        todo = [
+            s
+            for s in live
+            if title_basis(s) and self.basis.get(s.key) not in (title_basis(s), MANUAL)
+        ]
         if not todo:
             return 0
         untitled = any(s.key not in self.titles for s in todo)
         if now - self.last_run < (120_000 if untitled else 900_000):
             return 0
         self.last_run = now
+        return await self.name(state, agents, todo)
+
+    async def rename(self, db: Any, key: str, title: str) -> None:
+        """A title the owner typed; the namer leaves it alone. Empty = hand it back."""
+        if title.strip():
+            self.titles[key], self.basis[key] = title.strip()[:90], MANUAL
+            await db.set_title(key, self.titles[key], MANUAL)
+        else:
+            self.titles.pop(key, None)
+            self.basis.pop(key, None)
+            await db.delete_title(key)
+
+    async def name(self, state: Any, agents: dict[str, Any], todo: list[Session]) -> int:
+        """Ask the model for titles now (the owner pressed regenerate, or tick found work)."""
         digest = {
             "sessions": [
                 {
                     "key": s.key,
                     "dir": s.cwd,
+                    "harness_title": s.name,
                     "first_request": s.extra.get("first_user", ""),
                     "latest_request": s.extra.get("last_user", ""),
                     "goal": s.extra.get("goal", ""),

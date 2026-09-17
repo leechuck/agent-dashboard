@@ -84,7 +84,6 @@ async def nodes_ws(ws: WebSocket) -> None:
                         {"server_time": now_ms(), "armed": m.armed, "armed_until": m.armed_until},
                     )
                     log.info("node %s connected", m.id)
-                    await state.resubscribe(m.id)
                     continue
                 if link is None:
                     continue

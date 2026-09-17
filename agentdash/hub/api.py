@@ -118,11 +118,11 @@ async def session_messages(key: str, request: Request):
     s = await st.db.get_session(key)
     if not s:
         raise HTTPException(404, "unknown session")
-    if key not in st.caches:
+    if not st.caches.get(key):  # nothing yet, or an empty answer from a node that was not ready
         await st.ensure_subscribed(key)
         # wait for the node's initial batch (large transcripts take a few seconds to parse)
         for _ in range(120):
-            if key in st.caches:
+            if st.caches.get(key) or (key in st.caches and not s.transcript_path):
                 break
             await asyncio.sleep(0.1)
     return [slim(m.model_dump()) for m in st.caches.get(key, [])]
@@ -174,16 +174,25 @@ class StartBody(BaseModel):
     prompt: str = ""
     name: str = ""
     resume: str = ""
+    harness: str = "claude"
+    backend: str = "default"  # default | login | endpoint
+    login: str = ""
+    endpoint: str = ""
+    model: str = ""
+    effort: str = ""
+    permissions: str = "default"
+    mode: str = "background"  # background (Claude job) | tmux
+    # older clients
     permission_mode: str = ""
-    provider: str = "anthropic"
-    config_dir: str = ""  # which Claude login, by directory name (".claude-team")
+    config_dir: str = ""
 
 
 @router.post("/machines/{machine_id}/sessions")
 async def start_session(machine_id: str, body: StartBody, request: Request):
     st = _state(request)
     try:
-        return await st.session_start(machine_id, body.model_dump())
+        spec = {**body.model_dump(), "endpoints": await ck.endpoints_setting(st.db)}
+        return await st.session_start(machine_id, spec)
     except TimeoutError as e:
         raise HTTPException(504, "node did not answer") from e
 
@@ -317,6 +326,142 @@ async def cockpit_brief(request: Request):
     return _quiet_view(st.briefer.view(ck.fingerprint(d)), silenced)
 
 
+async def _node_call(request: Request, machine: str, type_: str, payload: dict, timeout=60):
+    st = _state(request)
+    link = st.nodes.get(machine)
+    if not link:
+        return {"ok": False, "error": f"{machine} is offline"}
+    payload = {**payload, "endpoints": await ck.endpoints_setting(st.db)}
+    try:
+        return await st.request(link, type_, payload, timeout=timeout)
+    except TimeoutError as e:
+        raise HTTPException(504, f"{machine} did not answer") from e
+
+
+@router.get("/catalog")
+async def catalog(request: Request, fresh: bool = False):
+    """Per machine: installed harnesses, Claude logins, models, and which endpoints work there."""
+    st = _state(request)
+    machines = sorted(st.nodes)
+    results = await asyncio.gather(
+        *(_node_call(request, m, "catalog.get", {"fresh": fresh}, timeout=40) for m in machines),
+        return_exceptions=True,
+    )
+    return {
+        "endpoints": await ck.endpoints_setting(st.db),
+        "machines": {
+            m: (r if isinstance(r, dict) else {"ok": False, "error": "did not answer"})
+            for m, r in zip(machines, results, strict=True)
+        },
+    }
+
+
+class EndpointsBody(BaseModel):
+    endpoints: list[dict]
+
+
+@router.put("/settings/endpoints")
+async def put_endpoints(body: EndpointsBody, request: Request):
+    fields = ("id", "name", "base_url", "anthropic_base_url", "key_env", "wire_api",
+              "context_window", "models")  # fmt: skip
+    clean = []
+    for raw in body.endpoints:
+        e = {k: raw[k] for k in fields if raw.get(k) not in (None, "", [])}
+        if not e.get("id") or not (e.get("base_url") or e.get("anthropic_base_url")):
+            raise HTTPException(400, "an endpoint needs an id and an address")
+        if e.get("key_env") and not str(e["key_env"]).replace("_", "").isalnum():
+            raise HTTPException(400, "the key variable must be a plain name such as MY_LLM_KEY")
+        clean.append(e)
+    await _state(request).db.set_setting("endpoints", {"list": clean})
+    return {"ok": True, "endpoints": clean}
+
+
+class LoginBody(BaseModel):
+    name: str
+
+
+@router.post("/machines/{machine_id}/logins")
+async def open_login(machine_id: str, body: LoginBody, request: Request):
+    """Create the login directory if needed and open Claude on it in tmux for /login."""
+    r = await _node_call(request, machine_id, "login.open", {"name": body.name.strip().lower()})
+    if r.get("ok") and r.get("tmux"):
+        t = r["tmux"]
+        r["terminal_key"] = f"{machine_id}:tmux:{t['socket']}:{t['target']}"
+    return r
+
+
+class SwitchBody(BaseModel):
+    harness: str = ""
+    backend: str = "default"
+    login: str = ""
+    endpoint: str = ""
+    model: str = ""
+    effort: str = ""
+    permissions: str = "default"
+    note: str = ""
+    force: bool = False
+    stop_old: bool = False
+
+
+@router.post("/sessions/{key}/switch")
+async def switch_session(key: str, body: SwitchBody, request: Request):
+    """Same harness: restart the conversation on another login, endpoint or model.
+    Other harness: start it in the same directory with a handover briefing."""
+    machine = key.split(":", 1)[0]
+    payload = {**body.model_dump(), "session_key": key, "mode": "tmux"}
+    r = await _node_call(request, machine, "session.switch", payload, timeout=90)
+    if r.get("ok") and r.get("tmux"):
+        t = r["tmux"]
+        r["terminal_key"] = f"{machine}:tmux:{t['socket']}:{t['target']}"
+    return r
+
+
+class TitleBody(BaseModel):
+    title: str = ""
+
+
+@router.put("/sessions/{key}/title")
+async def set_title(key: str, body: TitleBody, request: Request):
+    """Rename a session; an empty title hands naming back to the model."""
+    st = _state(request)
+    await st.titler.rename(st.db, key, body.title)
+    await _publish_title(st, key)
+    return {"ok": True, "title": st.titler.titles.get(key, "")}
+
+
+@router.post("/sessions/{key}/title/regenerate")
+async def regenerate_title(key: str, request: Request):
+    st = _state(request)
+    s = await st.db.get_session(key)
+    if not s:
+        raise HTTPException(404, "unknown session")
+    st.titler.basis.pop(key, None)
+    n = await st.titler.name(st, await _agents(request), [s])
+    await _publish_title(st, key)
+    return {"ok": n > 0, "title": st.titler.titles.get(key, "")}
+
+
+@router.post("/titles/regenerate")
+async def regenerate_titles(request: Request):
+    """Name every live session again, except the ones the owner named."""
+    st = _state(request)
+    live = [
+        s
+        for s in await st.db.list_sessions(active_only=True)
+        if s.harness != "tmux" and st.titler.basis.get(s.key) != ck.MANUAL
+    ]
+    return {"ok": True, "renamed": await st.titler.name(st, await _agents(request), live[:25])}
+
+
+async def _publish_title(st: HubState, key: str) -> None:
+    s = await st.db.get_session(key)
+    if s:
+        s.extra.pop("title", None)
+        st.titler.apply([s])
+        await st.db.update_session(s)
+        st.bus.publish("session.updated", s.model_dump())
+
+
 class AgentsBody(BaseModel):
     advice: dict = {}
     personal: dict = {}
@@ -324,7 +469,7 @@ class AgentsBody(BaseModel):
 
 
 _AGENT_FIELDS = {
-    "advice": {"machine", "harness", "model", "login", "effort"},
+    "advice": {"machine", "harness", "model", "login", "endpoint", "effort"},
     "personal": {"machine", "model", "login"},
     "titles": {"enabled", "model"},
 }

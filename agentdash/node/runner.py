@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import platform
 from pathlib import Path
 from typing import Any
 
 from .. import __version__
-from ..config import Settings
+from ..config import Settings, discover_claude_dirs
+from ..install.account import install_account
 from ..models import (
     HUB_ARM,
     HUB_DECISION_ANSWER,
@@ -36,11 +38,12 @@ from ..models import (
 )
 from . import briefing
 from .adapters import codex_rollout, hermes_state, opencode_store, pi_session
-from .adapters.claude_cli import job_action, kill_process, start_background
+from .adapters.claude_cli import job_action, kill_process
 from .adapters.claude_socket import SocketSendError, send_user_message
 from .adapters.claude_transcript import TranscriptTail, read_last
 from .adapters.claude_transcript import iter_messages as claude_iter
 from .adapters.tmux_keys import TmuxSendError, type_prompt
+from .catalog import Catalog
 from .collectors.claude import ClaudeCollector
 from .collectors.codex import CodexCollector
 from .collectors.hermes import HermesCollector
@@ -51,6 +54,14 @@ from .collectors.usage import UsageCollector
 from .decisions import DecisionManager
 from .hookserver import serve_hooks
 from .hubclient import HubClient
+from .launcher import (
+    Endpoint,
+    LaunchError,
+    LaunchSpec,
+    claude_config_dir,
+    handover_prompt,
+    launch,
+)
 from .lineage import link_parents
 from .pa import PersonalAssistant
 from .terminal import TerminalSession
@@ -64,6 +75,8 @@ class Node:
     def __init__(self, settings: Settings) -> None:
         self._tasks: set[asyncio.Task[Any]] = set()
         self.pa = PersonalAssistant(settings)
+        self.catalog = Catalog(settings)
+        self.pending_subs: set[str] = set()
         self.parents: dict[str, str] = {}  # session key -> key of the session that spawned it
         self.s = settings
         self.machine = settings.machine_id
@@ -113,7 +126,13 @@ class Node:
         elif frame.type == HUB_SESSION_ACTION:
             await self.session_action(p)
         elif frame.type == HUB_SESSION_START:
-            await self.session_start(p)
+            self._spawn(self.session_start(p))
+        elif frame.type == "catalog.get":
+            self._spawn(self.catalog_get(p))
+        elif frame.type == "login.open":
+            self._spawn(self.login_open(p))
+        elif frame.type == "session.switch":
+            self._spawn(self.session_switch(p))
         elif frame.type == "terminal.open":
             await self.terminal_open(p)
         elif frame.type == "cockpit.brief":
@@ -243,7 +262,13 @@ class Node:
     # commands ---------------------------------------------------------
     async def subscribe(self, key: str) -> None:
         sess = self.sessions.get(key)
-        if not sess or not sess.transcript_path:
+        if not sess:
+            # asked before the first roster was collected (right after a reconnect): answer
+            # when the session is known, never with an empty transcript that would be cached
+            self.pending_subs.add(key)
+            return
+        self.pending_subs.discard(key)
+        if not sess.transcript_path:
             await self.hub.send(NODE_MESSAGES, {"session_key": key, "messages": [], "reset": True})
             return
         if sess.harness == "hermes":
@@ -333,9 +358,12 @@ class Node:
     async def terminal_open(self, p: dict[str, Any]) -> None:
         term_id = p.get("term_id", "")
         base = self.s.hub_url.rsplit("/nodes", 1)[0]
+        sock = str(p.get("socket", ""))
+        if sock and "/" not in sock:  # a server name, as `tmux -L` takes it
+            sock = f"/tmp/tmux-{os.getuid()}/{sock}"
         t = TerminalSession(
             term_id,
-            p.get("socket", ""),
+            sock,
             p.get("target", ""),
             f"{base}/nodes/terminal/{term_id}",
             self.s.node_token,
@@ -415,8 +443,8 @@ class Node:
         result: dict[str, Any] = {"session_key": key, "request_id": rid, "ok": False}
         if not sess:
             result["error"] = "unknown session"
-        elif sess.harness != "claude":
-            result["error"] = f"no actions for {sess.harness} yet"
+        elif sess.harness != "claude" and action not in ("terminate", "kill"):
+            result["error"] = f"{action} is only available for Claude background jobs"
         elif action in ("stop", "rm", "respawn", "logs"):
             job_id = sess.extra.get("job_id")
             if job_id:
@@ -455,33 +483,127 @@ class Node:
 
     async def cockpit_brief(self, p: dict[str, Any]) -> None:
         result = await briefing.brief(
-            self.s, p.get("system", ""), p.get("digest") or {}, p.get("agent")
+            self.s, p.get("system", ""), p.get("digest") or {}, p.get("agent"), self._endpoints(p)
         )
         await self.hub.send(
             NODE_EVENT, {"kind": "brief.result", "request_id": p.get("request_id", ""), **result}
         )
 
-    async def session_start(self, p: dict[str, Any]) -> None:
-        rid = p.get("request_id", "")
-        config_dir = None
-        for d in self.s.claude_config_dirs:
-            if p.get("config_dir"):
-                if d.name == p["config_dir"]:  # a named login; only known dirs are accepted
-                    config_dir = str(d)
-            elif p.get("provider", "anthropic") == (
-                d.name.removeprefix(".claude-") if d.name != ".claude" else "anthropic"
-            ):
-                config_dir = str(d)
-        result = await start_background(
-            p.get("cwd", ""),
-            p.get("prompt", ""),
-            name=p.get("name", ""),
-            resume=p.get("resume", ""),
-            permission_mode=p.get("permission_mode", ""),
-            config_dir=config_dir,
+    def _endpoints(self, p: dict[str, Any]) -> list[Endpoint]:
+        out = []
+        for raw in p.get("endpoints") or []:
+            try:
+                out.append(Endpoint.parse(raw))
+            except (LaunchError, TypeError):
+                continue
+        return out
+
+    async def _reply(self, kind: str, p: dict[str, Any], result: dict[str, Any]) -> None:
+        await self.hub.send(
+            NODE_EVENT, {"kind": kind, "request_id": p.get("request_id", ""), **result}
         )
+
+    async def session_start(self, p: dict[str, Any]) -> None:
+        try:
+            spec = LaunchSpec.parse(p)
+            # new config dirs (a login added a minute ago) count without a node restart
+            self.s.claude_config_dirs = discover_claude_dirs()
+            result = await launch(spec, self.s, self._endpoints(p))
+        except LaunchError as e:
+            result = {"ok": False, "error": str(e)}
         self._refresh.set()
-        await self.hub.send(NODE_EVENT, {"kind": "start.result", "request_id": rid, **result})
+        await self._reply("start.result", p, result)
+
+    async def catalog_get(self, p: dict[str, Any]) -> None:
+        self.s.claude_config_dirs = discover_claude_dirs()
+        self.claude.config_dirs = [d for d in self.s.claude_config_dirs if d.exists()]
+        result = await self.catalog.get(self._endpoints(p), fresh=bool(p.get("fresh")))
+        await self._reply("catalog.result", p, result)
+
+    async def login_open(self, p: dict[str, Any]) -> None:
+        """Create (if needed) a Claude login directory and open Claude on it in tmux, so the
+        owner can run /login there from the dashboard's terminal."""
+        try:
+            name = str(p.get("name") or "")
+            done = await asyncio.to_thread(install_account, name)
+            self.s.claude_config_dirs = discover_claude_dirs()
+            self.claude.config_dirs = [d for d in self.s.claude_config_dirs if d.exists()]
+            spec = LaunchSpec(
+                harness="claude",
+                cwd=str(Path.home()),
+                backend="login",
+                login=f".claude-{name}",
+                name=f"login-{name}",
+            )
+            result = await launch(spec, self.s, [])
+            result["notes"] = done
+        except (LaunchError, ValueError) as e:
+            result = {"ok": False, "error": str(e)}
+        self._refresh.set()
+        await self._reply("login.result", p, result)
+
+    async def session_switch(self, p: dict[str, Any]) -> None:
+        try:
+            result = await self._switch(p)
+        except LaunchError as e:
+            result = {"ok": False, "error": str(e)}
+        self._refresh.set()
+        await self._reply("switch.result", p, result)
+
+    async def _stop(self, sess: Session) -> None:
+        """End a session's process and wait until it is gone: two agents must never write
+        to one transcript."""
+        job = sess.extra.get("job_id")
+        if job and sess.harness == "claude":
+            await job_action("stop", job, sess.extra.get("config_dir"))
+        if sess.pid:
+            kill_process(sess.pid)
+            for _ in range(60):
+                if not Path(f"/proc/{sess.pid}").exists():
+                    return
+                await asyncio.sleep(0.25)
+            kill_process(sess.pid, hard=True)
+            await asyncio.sleep(0.5)
+
+    async def _switch(self, p: dict[str, Any]) -> dict[str, Any]:
+        sess = self.sessions.get(p.get("session_key", ""))
+        if not sess:
+            raise LaunchError("unknown session")
+        if sess.harness not in ("claude", "codex", "pi"):
+            raise LaunchError(f"{sess.harness} sessions cannot be restarted from here")
+        self.s.claude_config_dirs = discover_claude_dirs()
+        target = LaunchSpec.parse(
+            {**p, "cwd": sess.cwd, "harness": p.get("harness") or sess.harness}
+        )
+        same_harness = target.harness == sess.harness
+        if same_harness:
+            # same conversation, other login / model / endpoint: restart it with --resume
+            if sess.status == "busy" and not p.get("force"):
+                raise LaunchError(
+                    "the session is working; wait for it to finish its turn, or force"
+                )
+            if sess.harness == "claude" and target.backend == "login":
+                new_dir = claude_config_dir(self.s, target.login)
+                old_dir = Path(sess.extra.get("config_dir") or Path.home() / ".claude")
+                if (new_dir / "projects").resolve() != (old_dir / "projects").resolve():
+                    raise LaunchError(
+                        f"{target.login} does not share transcripts with {old_dir.name}; "
+                        "create it with `agentdash install account` so a session can move over"
+                    )
+            target.resume = sess.session_id
+            target.prompt = str(p.get("note") or "")
+            target.name = target.name or sess.name
+            await self._stop(sess)
+        else:
+            # another harness cannot load the conversation: it gets a briefing and the transcript
+            note = str(p.get("note") or "").strip()
+            target.name = target.name or f"{Path(sess.cwd).name}-handover"
+            target.prompt = handover_prompt(sess, note)
+            if p.get("stop_old"):
+                await self._stop(sess)
+        result = await launch(target, self.s, self._endpoints(p))
+        result["resumed"] = same_harness
+        return result
 
     # loops ------------------------------------------------------------
     def _apply_hints(self, sessions: list[Session]) -> None:
@@ -515,6 +637,8 @@ class Node:
                 await asyncio.to_thread(link_parents, sessions, self.parents)
                 self.sessions = {s.key: s for s in sessions}
                 await self.hub.send(NODE_SESSIONS, {"sessions": [s.model_dump() for s in sessions]})
+                for key in [k for k in self.pending_subs if k in self.sessions]:
+                    await self.subscribe(key)
             except Exception:  # noqa: BLE001
                 log.exception("roster collection failed")
             try:

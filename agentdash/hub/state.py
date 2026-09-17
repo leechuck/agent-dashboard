@@ -117,17 +117,15 @@ class HubState:
             and not s.extra.get("parent")
             and (s.status == "busy" or s.updated_at > cutoff)
         ][:limit]
-        for key in want:
+        # a node that reconnected has forgotten what it was tailing: anything cached for it
+        # is asked for again, or those transcripts would silently stop updating
+        listed = {s.key for s in sessions}
+        held = [k for k in self.caches if k.split(":", 1)[0] == machine and k in listed]
+        for key in [*want, *held]:
             await self.ensure_subscribed(key)
         gone = {s.key for s in sessions if s.status not in ("busy", "idle", "waiting")}
         for key in [k for k in link.subscriptions if k in gone]:
             await self.unsubscribe(key)
-
-    async def resubscribe(self, machine: str) -> None:
-        """A node that reconnected has forgotten what it was tailing; cached transcripts
-        would silently stop updating."""
-        for key in [k for k in self.caches if k.split(":", 1)[0] == machine]:
-            await self.ensure_subscribed(key)
 
     def cache_messages(self, session_key: str, msgs: list[Message], reset: bool) -> None:
         cache = self.caches.setdefault(session_key, deque(maxlen=2000))

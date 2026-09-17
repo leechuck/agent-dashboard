@@ -1,5 +1,5 @@
 import { api, subscribe } from './api'
-import type { BusEvent, Cockpit, Decision, Machine, Message, Session, UsageWindow } from './types'
+import type { BusEvent, Catalog, Cockpit, Decision, Machine, Message, Session, UsageWindow } from './types'
 
 export class Fleet {
   machines = $state<Record<string, Machine>>({})
@@ -8,6 +8,19 @@ export class Fleet {
   decisions = $state<Record<string, Decision>>({})
   usage = $state<UsageWindow[]>([])
   cockpit = $state<Cockpit | null>(null)
+  catalog = $state<Catalog | null>(null)
+  private catalogAt = 0
+
+  /** What each machine can run. Probing endpoints takes seconds, so it is kept for a while. */
+  async loadCatalog(fresh = false) {
+    if (!fresh && this.catalog && Date.now() - this.catalogAt < 120000) return
+    try {
+      this.catalog = await api.catalog(fresh)
+      this.catalogAt = Date.now()
+    } catch {
+      /* forms fall back to plain defaults */
+    }
+  }
   /** Prompt drafts handed from the cockpit to a session's composer, by session key. */
   drafts = $state<Record<string, string>>(loadDrafts())
 
@@ -240,7 +253,9 @@ function emptyMachine(id: string): Machine {
   return { id, hostname: id, os: '', harnesses: [], node_version: '', online: false, armed: false, armed_until: 0, last_seen: 0 }
 }
 
-const rank: Record<string, number> = { waiting: 0, busy: 1, idle: 2, done: 3, stopped: 4, failed: 5, offline: 6 }
+// what needs the owner comes first: blocked on a question, then finished and waiting for
+// the next instruction; agents that are working need nothing
+const rank: Record<string, number> = { waiting: 0, idle: 1, busy: 2, done: 3, stopped: 4, failed: 5, offline: 6 }
 function bySeverity(a: Session, b: Session): number {
   const r = (rank[a.status] ?? 9) - (rank[b.status] ?? 9)
   return r !== 0 ? r : b.updated_at - a.updated_at

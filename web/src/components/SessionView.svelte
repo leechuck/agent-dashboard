@@ -6,6 +6,7 @@
   import Composer from './Composer.svelte'
   import SessionActions from './SessionActions.svelte'
   import SessionSwitcher from './SessionSwitcher.svelte'
+  import SwitchPanel from './SwitchPanel.svelte'
 
   let { key }: { key: string } = $props()
   const session = $derived(fleet.sessions[key])
@@ -15,6 +16,27 @@
   const ctx = $derived(session ? contextOf(session) : null)
   const parent = $derived(x.parent ? fleet.sessions[x.parent] : undefined)
   let showThinking = $state(false)
+  let switching = $state(false)
+  let renaming = $state(false)
+  let newTitle = $state('')
+  let titleBusy = $state(false)
+  async function saveTitle(title: string) {
+    titleBusy = true
+    try {
+      await api.setTitle(key, title)
+    } finally {
+      titleBusy = false
+      renaming = false
+    }
+  }
+  async function regenerate() {
+    titleBusy = true
+    try {
+      await api.regenerateTitle(key)
+    } finally {
+      titleBusy = false
+    }
+  }
   let showMeta = $state(false)
   let list: HTMLElement | undefined = $state()
   let stickBottom = $state(true)
@@ -85,7 +107,18 @@
   <div class="head">
     <a class="back" href="#/">← Fleet</a>
     <div class="title">
-      <span class="name">{displayName(session)}</span>
+      {#if renaming}
+        <form class="rename" onsubmit={(e) => { e.preventDefault(); saveTitle(newTitle) }}>
+          <!-- svelte-ignore a11y_autofocus -->
+          <input bind:value={newTitle} autofocus onkeydown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); renaming = false } }} />
+          <button class="primary" type="submit" disabled={titleBusy}>Save</button>
+          <button type="button" onclick={() => saveTitle('')} title="Let the model name it again">Auto</button>
+        </form>
+      {:else}
+        <span class="name">{displayName(session)}</span>
+        <button class="tbtn" title="Rename" onclick={() => { newTitle = displayName(session); renaming = true }}>✎</button>
+        <button class="tbtn" title="Generate a new title" disabled={titleBusy} onclick={regenerate}>{titleBusy ? '…' : '↻'}</button>
+      {/if}
       <span class="muted small">{backendLabel(session)} on {session.machine}{session.kind === 'background' ? ' · background' : ''}</span>
     </div>
     <div class={`state small ${session.status}`}>{statusLabel(session.status, session.waiting_for, !!x.goal)}</div>
@@ -95,10 +128,12 @@
       {#if modelLabel(session)}<span>{modelLabel(session)}{x.fast_mode ? ' · fast' : ''}</span>{/if}
       {#if x.effort}<span>thinking {x.effort}</span>{/if}
       {#if ctx}<span class:hotctx={ctx.pct >= 85}>context {ctx.pct.toFixed(0)}%{ctx.window ? ` of ${ctx.window}` : ''}{typeof x.context_tokens === 'number' && x.context_tokens ? ` (${Math.round(x.context_tokens / 1000)}k tokens)` : ''}</span>{/if}
+      {#if x.subagents?.total}<span>⑂ {x.subagents.total} sub-agent{x.subagents.total === 1 ? '' : 's'}{x.subagents.running ? `, ${x.subagents.running} running${x.subagents.doing?.length ? `: ${x.subagents.doing.join(' · ')}` : ''}` : ''}</span>{/if}
       {#if typeof x.cost_usd === 'number'}<span title="API-price equivalent of this session">≈ ${x.cost_usd.toFixed(2)}</span>{/if}
       {#if parent}<a href={`#/session/${encodeURIComponent(parent.key)}`}>sub-agent of {displayName(parent)}</a>{/if}
     </div>
-    <SessionActions {session} />
+    <div class="actrow"><SessionActions {session} /><button class="swbtn" onclick={() => (switching = !switching)}>Switch agent / model…</button></div>
+    {#if switching}<SwitchPanel {session} onclose={() => (switching = false)} />{/if}
     <div class="tools small">
       <label><input type="checkbox" bind:checked={showThinking} /> thinking</label>
       <label><input type="checkbox" bind:checked={showMeta} /> system context</label>
@@ -127,6 +162,13 @@
 <style>
   .facts { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 2px; }
   .hotctx { color: var(--signal); }
+  .tbtn { border: 0; background: none; padding: 0 4px; color: var(--muted); font-size: 14px; }
+  .tbtn:hover { color: var(--ink); }
+  .rename { display: flex; gap: 6px; flex: 1; }
+  .rename input { flex: 1; min-width: 0; padding: 4px 8px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--page); font: inherit; font-weight: 600; }
+  .rename button { font-size: 13px; padding: 3px 10px; }
+  .actrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .swbtn { font-size: 13px; padding: 4px 10px; }
   .goal { margin-top: 4px; padding: 5px 8px; background: var(--cobalt-soft); border-radius: var(--radius); max-height: 5.8em; overflow: auto; }
   .head {
     position: sticky;

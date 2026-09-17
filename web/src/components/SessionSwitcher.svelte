@@ -57,7 +57,7 @@
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--hairline); flex: none; }
   .dot.busy { background: var(--cobalt); }
   .dot.waiting { background: var(--signal); }
-  .dot.idle { background: var(--moss); }
+  .dot.idle { background: var(--amber); }
   .hint { flex: none; margin-left: auto; padding-left: 12px; font-size: 11.5px; color: var(--muted); }
   @media (max-width: 700px) { .hint { display: none; } }
 </style>

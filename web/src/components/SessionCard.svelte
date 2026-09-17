@@ -11,6 +11,10 @@
   const working = $derived(kids.filter((k) => k.status === 'busy').length)
   const blocked = $derived(kids.filter((k) => k.status === 'waiting').length)
   let showKids = $state(false)
+  // sub-agents inside the session (Claude's Agent tool) plus agents it started as processes
+  const inner = $derived((x.subagents ?? null) as { total: number; running: number; doing: string[] } | null)
+  const subTotal = $derived((inner?.total ?? 0) + kids.length)
+  const subRunning = $derived((inner?.running ?? 0) + working)
   /** What it was last asked, unless that is just "continue": then the standing goal or first request. */
   const asked = $derived.by(() => {
     const last = String(x.last_user ?? '')
@@ -26,12 +30,14 @@
     <header>
       <span class={`dot ${s.status}`}></span>
       <span class="state">{stale ? 'stale' : statusLabel(s.status, s.waiting_for, !!x.goal)}</span>
+      {#if subTotal}<span class="subs" class:live={subRunning > 0} title={inner?.doing?.length ? `Running now: ${inner.doing.join(' · ')}` : 'Sub-agents this session has used'}>⑂ {subRunning > 0 ? `${subRunning} of ${subTotal} sub-agents running` : `${subTotal} sub-agent${subTotal === 1 ? '' : 's'}`}</span>{/if}
       {#if fleet.drafts[s.key]}<span class="draft" title="You have unsent text for this session">draft</span>{/if}
       <span class="age">{ago(s.updated_at)}</span>
     </header>
     <h3>{displayName(s)}</h3>
     <div class="where">{backendLabel(s)}{x.tmux && s.harness !== 'tmux' ? ' · tmux' : ''} · {shortCwd(s.cwd)}</div>
     {#if asked}<p class="asked"><span class="lbl">{asked.label}</span> {asked.text}</p>{/if}
+    {#if inner?.doing?.length}<p class="doing"><span class="lbl">sub-agents</span> {inner.doing.join(' · ')}</p>{/if}
     {#if s.last_line}<p class="last">{s.last_line}</p>{/if}
     <footer>
       {#if model}<span>{model}{x.fast_mode ? ' · fast' : ''}</span>{/if}
@@ -72,16 +78,21 @@
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--hairline); flex: none; }
   .dot.busy { background: var(--cobalt); animation: beat 1.8s ease-in-out infinite; }
   .dot.waiting { background: var(--signal); }
-  .dot.idle { background: var(--moss); }
+  .dot.idle { background: var(--amber); }
+  .idle .state { color: var(--amber); }
+  .card.idle { border-top-color: var(--amber); }
   .state { font-weight: 600; letter-spacing: .02em; color: var(--muted); }
   .busy .state { color: var(--cobalt); }
   .waiting .state { color: var(--signal); }
+  .subs { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+  .subs.live { color: var(--cobalt); font-weight: 600; }
   .draft { font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--amber); background: var(--amber-soft); padding: 0 6px; border-radius: 8px; }
   .age { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
   h3 { margin: 2px 0 0; font-size: 17px; line-height: 1.25; font-weight: 600; letter-spacing: -.005em; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .where { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   p { margin: 3px 0 0; font-size: 13.5px; line-height: 1.4; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
   .asked { -webkit-line-clamp: 2; line-clamp: 2; }
+  .doing { -webkit-line-clamp: 2; line-clamp: 2; color: var(--cobalt); }
   .lbl { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-right: 4px; }
   .last { -webkit-line-clamp: 3; line-clamp: 3; color: var(--muted); border-left: 2px solid var(--hairline); padding-left: 8px; }
   footer { display: flex; flex-wrap: wrap; gap: 3px 12px; margin-top: auto; padding-top: 8px; font-size: 12px; color: var(--muted); }

@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from ..config import Settings
+from .launcher import secret
 
 
 def _agent(s: Settings, agent: dict[str, Any] | None) -> dict[str, str]:
@@ -23,13 +24,23 @@ def _agent(s: Settings, agent: dict[str, Any] | None) -> dict[str, str]:
         "model": a.get("model") or default_model.get(harness, ""),
         "effort": a.get("effort") or "low",
         "login": a.get("login") or "",
+        "endpoint": a.get("endpoint") or "",
     }
 
 
 async def brief(
-    s: Settings, system: str, digest: dict[str, Any], agent: dict[str, Any] | None = None
+    s: Settings,
+    system: str,
+    digest: dict[str, Any],
+    agent: dict[str, Any] | None = None,
+    endpoints: list[Any] | None = None,
 ) -> dict[str, Any]:
     a = _agent(s, agent)
+    ep = next((e for e in endpoints or [] if e.id == a["endpoint"]), None)
+    if a["harness"] == "api" and ep is not None:
+        a["base_url"], a["key"] = ep.base_url, secret(s, ep.key_env)
+        if ep.key_env and not a["key"]:
+            return {"ok": False, "error": "no key"}  # another machine may hold it
     if a["harness"] == "claude":
         return await _brief_claude(s, system, digest, a)
     if a["harness"] == "codex":
@@ -136,7 +147,8 @@ async def _brief_codex(
 async def _brief_openai(
     s: Settings, system: str, digest: dict[str, Any], a: dict[str, str]
 ) -> dict[str, Any]:
-    key = s.cockpit_api_key or os.environ.get("OPENROUTER_API_KEY", "")
+    key = a.get("key") or s.cockpit_api_key or os.environ.get("OPENROUTER_API_KEY", "")
+    base_url = a.get("base_url") or s.cockpit_base_url
     if not key:
         return {"ok": False, "error": "no key"}
     body = {
@@ -147,14 +159,14 @@ async def _brief_openai(
         ],
         "max_tokens": 8000,
     }
-    if "openrouter.ai" in s.cockpit_base_url:
+    if "openrouter.ai" in base_url:
         # reasoning models otherwise spend the whole budget thinking and return no text
         body["reasoning"] = {"effort": a["effort"]}
         body["usage"] = {"include": True}
     try:
         async with httpx.AsyncClient(timeout=100) as c:
             r = await c.post(
-                f"{s.cockpit_base_url.rstrip('/')}/chat/completions",
+                f"{base_url.rstrip('/')}/chat/completions",
                 headers={"Authorization": f"Bearer {key}", "X-Title": "agentdash cockpit"},
                 json=body,
             )

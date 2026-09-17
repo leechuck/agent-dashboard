@@ -64,6 +64,19 @@ def list_panes() -> list[Pane]:
     return panes
 
 
+def capture_raw(sock: str, target: str) -> str:
+    try:
+        r = subprocess.run(
+            ["tmux", "-S", sock, "capture-pane", "-p", "-t", target],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return r.stdout[-4000:]
+
+
 def capture_tail(sock: str, target: str, lines: int = 3) -> str:
     try:
         r = subprocess.run(
@@ -76,6 +89,14 @@ def capture_tail(sock: str, target: str, lines: int = 3) -> str:
         return ""
     out = [ln for ln in r.stdout.splitlines() if ln.strip()]
     return " ⏎ ".join(out[-lines:])[:160]
+
+
+# what an agent shows before it has a session of its own, and cannot go on without an answer
+_QUESTIONS = (
+    ("Do you trust", "your OK to work in this folder (open its terminal)"),
+    ("trust this folder", "your OK to work in this folder (open its terminal)"),
+    ("Select login method", "a login (open its terminal)"),
+)
 
 
 class TmuxCollector:
@@ -103,6 +124,8 @@ class TmuxCollector:
         for pane in panes:
             if not pane.agent or pane.agent_pid in claimed:
                 continue
+            tail = capture_raw(pane.socket, pane.target)
+            asks = next((label for needle, label in _QUESTIONS if needle in tail), "")
             sid = f"{Path(pane.socket).name}:{pane.target}"
             sessions.append(
                 Session(
@@ -114,7 +137,8 @@ class TmuxCollector:
                     name=f"{pane.agent} in {pane.target}",
                     cwd=pane.path,
                     kind="interactive",
-                    status=SessionStatus.busy,
+                    status=SessionStatus.waiting if asks else SessionStatus.busy,
+                    waiting_for=asks,
                     pid=pane.agent_pid,
                     started_at=procs.start_ms(pane.agent_pid),
                     updated_at=now_ms(),

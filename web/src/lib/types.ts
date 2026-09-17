@@ -204,7 +204,7 @@ export interface PAState {
 }
 
 export interface AgentSettings {
-  advice: { machine: string; harness: 'claude' | 'codex' | 'api'; model: string; login: string; effort: string }
+  advice: { machine: string; harness: 'claude' | 'codex' | 'api'; model: string; login: string; endpoint: string; effort: string }
   personal: { machine: string; model: string; login: string }
   titles: { enabled: boolean; model: string }
 }
@@ -213,4 +213,48 @@ export interface AgentSettingsView {
   agents: AgentSettings
   machines: string[]
   logins: { dir: string; account: string }[]
+}
+
+export interface Endpoint {
+  id: string
+  name?: string
+  base_url?: string
+  anthropic_base_url?: string
+  key_env?: string
+  wire_api?: string
+  context_window?: number
+  models?: string[]
+}
+
+export interface ModelChoice {
+  id: string
+  label: string
+  efforts?: string[]
+}
+
+export interface MachineCatalog {
+  ok: boolean
+  error?: string
+  harnesses: Record<string, boolean>
+  tmux: boolean
+  logins: { dir: string; name: string; account: string; plan: string; logged_in: boolean }[]
+  models: Record<string, ModelChoice[]>
+  efforts: Record<string, string[]>
+  endpoints: { id: string; key_present: boolean; reachable: boolean; models: string[]; error: string }[]
+}
+
+export interface Catalog {
+  endpoints: Endpoint[]
+  machines: Record<string, MachineCatalog>
+}
+
+/** What to run: harness, where the tokens come from, model and how it may act. */
+export interface AgentChoice {
+  harness: string
+  backend: 'default' | 'login' | 'endpoint'
+  login: string
+  endpoint: string
+  model: string
+  effort: string
+  permissions: string
 }

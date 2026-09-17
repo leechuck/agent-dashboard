@@ -12,8 +12,14 @@ from typing import Any
 _ID_RE = re.compile(r"backgrounded\s+·\s+(\S+)")
 
 
-async def _run(args: list[str], config_dir: str | None, cwd: str | None, timeout: float = 60):
-    env = dict(os.environ)
+async def _run(
+    args: list[str],
+    config_dir: str | None,
+    cwd: str | None,
+    timeout: float = 60,
+    env_extra: dict[str, str] | None = None,
+):
+    env = {**os.environ, **(env_extra or {})}
     if config_dir:
         env["CLAUDE_CONFIG_DIR"] = config_dir
     proc = await asyncio.create_subprocess_exec(
@@ -88,6 +94,7 @@ async def start_background(
     permission_mode: str = "",
     config_dir: str | None = None,
     model: str = "",
+    env_extra: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     path = Path(cwd).expanduser()
     if not path.is_dir():
@@ -105,7 +112,7 @@ async def start_background(
         args.append(prompt)
     elif not resume:
         return {"ok": False, "error": "a prompt is required"}
-    rc, out, err = await _run(args, config_dir, str(path), timeout=90)
+    rc, out, err = await _run(args, config_dir, str(path), timeout=90, env_extra=env_extra)
     m = _ID_RE.search(out)
     return {
         "ok": rc == 0,

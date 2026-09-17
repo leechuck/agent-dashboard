@@ -2,33 +2,25 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
   import { fleet } from '../lib/store.svelte'
+  import AgentPicker from './AgentPicker.svelte'
+  import type { AgentChoice } from '../lib/types'
 
   let { machine: initialMachine = '', resume = '', title = '' }: { machine?: string; resume?: string; title?: string } = $props()
   let machine = $state(initialMachine)
   let cwd = $state(title)
   let prompt = $state('')
   let name = $state('')
-  let mode = $state('default')
-  let login = $state('')
-  /** Claude logins seen in the limits (one per config directory); offered when there are several. */
-  const logins = $derived.by(() => {
-    const seen = new Map<string, string>()
-    for (const w of fleet.usage) {
-      const dir = String(w.detail?.config_dir ?? '')
-      if (w.provider === 'anthropic' && dir && !seen.has(dir)) seen.set(dir, w.account)
-    }
-    return [...seen.entries()].map(([dir, account]) => ({ dir, account }))
-  })
-  const suggested = $derived(fleet.cockpit?.headroom.filter((h) => h.provider === 'anthropic').sort((a, b) => a.used_pct - b.used_pct)[0]?.account ?? '')
-  $effect(() => {
-    if (!login && logins.length > 1) login = (logins.find((l) => l.account === suggested) ?? logins[0]).dir
-  })
+  let mode = $state<'background' | 'tmux'>('background')
+  let agent = $state<AgentChoice>({ harness: 'claude', backend: 'default', login: '', endpoint: '', model: '', effort: '', permissions: 'default' })
   let dirs = $state<string[]>([])
   let busy = $state(false)
   let msg = $state('')
   let ok = $state(false)
 
   const machines = $derived(Object.values(fleet.machines).filter((m) => m.online).map((m) => m.id))
+  // only Claude has a background-job mode; everything else lives in a tmux session
+  const canBackground = $derived(agent.harness === 'claude' && !!prompt.trim())
+  const effectiveMode = $derived(canBackground ? mode : 'tmux')
 
   async function loadDirs() {
     if (!machine) return
@@ -41,6 +33,7 @@
   }
   onMount(() => {
     if (!machine && machines.length) machine = machines[0]
+    fleet.loadCatalog()
     loadDirs()
   })
   $effect(() => {
@@ -53,9 +46,13 @@
     busy = true
     msg = ''
     try {
-      const r = await api.startSession(machine, { cwd, prompt, name, resume, permission_mode: mode, config_dir: logins.length > 1 ? login : '' })
+      const r = await api.startSession(machine, { ...agent, cwd, prompt, name, resume, mode: effectiveMode })
       ok = r.ok
-      msg = r.ok ? `Started${r.job_id ? ` as ${r.job_id}` : ''}. It appears in the fleet in a few seconds.` : r.error || r.output || 'failed'
+      msg = r.ok
+        ? r.attach
+          ? `Started in tmux. It shows up on the board in a few seconds; from a terminal on ${machine}: ${r.attach}`
+          : `Started${r.job_id ? ` as ${r.job_id}` : ''}. It shows up on the board in a few seconds.`
+        : r.error || r.output || 'failed'
       if (r.ok) prompt = ''
     } catch (err) {
       ok = false
@@ -67,39 +64,38 @@
 </script>
 
 <form class="new" onsubmit={start}>
-  <h1>{resume ? 'Resume in the background' : 'New background session'}</h1>
+  <h1>{resume ? 'Resume a session' : 'New session'}</h1>
   <label>Machine
     <select bind:value={machine}>
       {#each machines as m}<option value={m}>{m}</option>{/each}
     </select>
   </label>
+
+  <fieldset>
+    <legend>Agent and model</legend>
+    <AgentPicker {machine} bind:value={agent} lockHarness={!!resume} />
+  </fieldset>
+
   <label>Directory
     <input list="dirs" bind:value={cwd} placeholder="/home/leechuck/…" required />
     <datalist id="dirs">{#each dirs as d}<option value={d}></option>{/each}</datalist>
   </label>
   <label>{resume ? 'Message (optional)' : 'Task'}
-    <textarea rows="4" bind:value={prompt} required={!resume} placeholder={resume ? 'Continue with…' : 'What should it do?'}></textarea>
+    <textarea rows="4" bind:value={prompt} placeholder={resume ? 'Continue with…' : 'What should it do? Leave empty to open it and type later.'}></textarea>
   </label>
-  {#if logins.length > 1}
-    <label>Claude login
-      <select bind:value={login}>
-        {#each logins as l (l.dir)}
-          <option value={l.dir}>{l.account}{l.account === suggested ? ' (most room)' : ''}</option>
-        {/each}
-      </select>
-    </label>
-  {/if}
   <div class="row">
     <label>Name <input bind:value={name} placeholder="optional" /></label>
-    <label>Permissions
-      <select bind:value={mode}>
-        <option value="default">ask (default)</option>
-        <option value="acceptEdits">accept edits</option>
-        <option value="plan">plan only</option>
+    <label>Runs as
+      <select bind:value={mode} disabled={!canBackground}>
+        <option value="background">Claude background job</option>
+        <option value="tmux">tmux session (terminal, /commands)</option>
       </select>
     </label>
   </div>
-  <p class="small muted">Runs <code>claude --bg</code> on that machine as a Claude Code background session. Arm the machine to get its permission prompts here.</p>
+  <p class="small muted">
+    {#if effectiveMode === 'tmux'}Runs in its own tmux session on {machine || 'the machine'}: you can type into it from here, open its terminal, or attach from a shell. A folder it has never seen may first ask whether you trust it; open the terminal to answer.
+    {:else}Runs as a Claude Code background job. Arm the machine to get its permission prompts here.{/if}
+  </p>
   <div class="actions">
     <button class="primary" type="submit" disabled={busy || !machine || !cwd}>{busy ? 'Starting…' : 'Start'}</button>
     <a href="#/">Cancel</a>
@@ -108,10 +104,12 @@
 </form>
 
 <style>
-  .new { padding: 16px; display: grid; gap: 12px; max-width: 640px; }
+  .new { padding: 16px; display: grid; gap: 12px; max-width: 760px; }
   h1 { font-size: 22px; margin: 0; }
   label { display: grid; gap: 4px; font-size: 14px; }
   input, select, textarea { padding: 8px 10px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--surface); font-size: 15px; }
+  fieldset { border: 1px solid var(--hairline); border-radius: var(--radius); padding: 10px 12px 12px; margin: 0; background: var(--surface); }
+  legend { font-size: 13px; color: var(--muted); padding: 0 6px; }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .actions { display: flex; gap: 14px; align-items: center; }
   .ok { color: var(--moss); }

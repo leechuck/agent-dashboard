@@ -118,6 +118,38 @@ def _describe(extra: dict[str, Any], facts: dict[str, Any], sid: str, state_dir:
     extra["context_pct"] = round(pct if pct is not None else 100 * tokens / window, 1)
 
 
+def inner_subagents(tpath: Path | None, now: int, busy: bool) -> dict[str, Any] | None:
+    """Sub-agents Claude runs inside the session (Agent tool). They are not processes; each
+    writes `<session>/subagents/agent-<id>.jsonl`. One counts as running while its file was
+    written to in the last two minutes."""
+    if not tpath:
+        return None
+    folder = tpath.with_suffix("") / "subagents"
+    try:
+        files = [
+            f for f in folder.iterdir() if f.name.startswith("agent-") and f.suffix == ".jsonl"
+        ]
+    except OSError:
+        return None
+    if not files:
+        return None
+    running = []
+    for f in files:
+        try:
+            fresh = now - int(f.stat().st_mtime * 1000) < 120_000
+        except OSError:
+            continue
+        if fresh:  # background sub-agents keep going while the parent sits idle
+            label = ""
+            try:
+                meta = json.loads(f.with_suffix("").with_suffix(".meta.json").read_text())
+                label = str(meta.get("description") or meta.get("agentType") or "")
+            except (OSError, json.JSONDecodeError):
+                pass
+            running.append(label[:60])
+    return {"total": len(files), "running": len(running), "doing": [x for x in running if x][:6]}
+
+
 class ClaudeCollector:
     def __init__(
         self, machine: str, config_dirs: list[Path], state_dir: Path | None = None
@@ -216,6 +248,9 @@ class ClaudeCollector:
                 facts = tail_facts(tpath) if tpath else {}
                 self._requests(sid, tpath, facts)
                 _describe(extra, facts, sid, self.state_dir)
+                inner = inner_subagents(tpath, now_ms(), status == SessionStatus.busy)
+                if inner:
+                    extra["subagents"] = inner
                 sessions.append(
                     Session(
                         key=Session.make_key(self.machine, Harness.claude, sid),

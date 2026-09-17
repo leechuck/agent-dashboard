@@ -1,4 +1,4 @@
-import type { AgentSettings, AgentSettingsView, BusEvent, Cockpit, Decision, PAState, Machine, Message, Session, UsageWindow } from './types'
+import type { AgentChoice, AgentSettings, Catalog, Endpoint, AgentSettingsView, BusEvent, Cockpit, Decision, PAState, Machine, Message, Session, UsageWindow } from './types'
 
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } })
@@ -38,11 +38,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ action }),
     }),
-  startSession: (machine: string, spec: { cwd: string; prompt?: string; name?: string; resume?: string; permission_mode?: string; config_dir?: string }) =>
-    j<{ ok: boolean; error?: string; job_id?: string; output?: string }>(`/api/machines/${encodeURIComponent(machine)}/sessions`, {
+  startSession: (machine: string, spec: Partial<AgentChoice> & { cwd: string; prompt?: string; name?: string; resume?: string; mode?: string }) =>
+    j<{ ok: boolean; error?: string; job_id?: string; output?: string; attach?: string; tmux?: { name: string } }>(`/api/machines/${encodeURIComponent(machine)}/sessions`, {
       method: 'POST',
       body: JSON.stringify(spec),
     }),
+  catalog: (fresh = false) => j<Catalog>(`/api/catalog?fresh=${fresh}`),
+  saveEndpoints: (endpoints: Endpoint[]) => j<{ ok: boolean }>('/api/settings/endpoints', { method: 'PUT', body: JSON.stringify({ endpoints }) }),
+  openLogin: (machine: string, name: string) =>
+    j<{ ok: boolean; error?: string; terminal_key?: string; attach?: string }>(`/api/machines/${encodeURIComponent(machine)}/logins`, { method: 'POST', body: JSON.stringify({ name }) }),
+  switchSession: (key: string, body: Partial<AgentChoice> & { note?: string; force?: boolean; stop_old?: boolean }) =>
+    j<{ ok: boolean; error?: string; resumed?: boolean; attach?: string; terminal_key?: string }>(`/api/sessions/${encodeURIComponent(key)}/switch`, { method: 'POST', body: JSON.stringify(body) }),
+  setTitle: (key: string, title: string) => j<{ ok: boolean; title: string }>(`/api/sessions/${encodeURIComponent(key)}/title`, { method: 'PUT', body: JSON.stringify({ title }) }),
+  regenerateTitle: (key: string) => j<{ ok: boolean; title: string }>(`/api/sessions/${encodeURIComponent(key)}/title/regenerate`, { method: 'POST', body: '{}' }),
+  regenerateTitles: () => j<{ ok: boolean; renamed: number }>('/api/titles/regenerate', { method: 'POST', body: '{}' }),
   cleanup: (machine: string, keys?: string[]) =>
     j<{ removed: number; results: { key: string; ok: boolean; error?: string }[] }>(`/api/machines/${encodeURIComponent(machine)}/cleanup`, {
       method: 'POST',

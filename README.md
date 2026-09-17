@@ -30,7 +30,13 @@ What it does:
 - **Decisions**: permission prompts from Claude (and Codex, pi) answered from
   the phone while a machine is *armed*; otherwise the terminal dialog appears
   as usual (ADR 0002).
-- **Session**: live transcript, send a message into a running session (Claude
+- **New session / Switch**: start any installed harness (Claude Code, Codex, pi,
+  opencode) on any Claude login or any endpoint you configured (OpenRouter, your
+  own vLLM server, ...), with model and thinking level from lists; move a running
+  session to another subscription, model or harness (ADR 0006). Second Claude
+  subscription: Settings, Claude logins, "Add and log in".
+- **Session**: live transcript rendered like the agent's own terminal (Markdown,
+  tool calls, diffs), rename or regenerate its title, send a message into a running session (Claude
   inbox socket, pi extension), stop/remove/respawn/fork background sessions,
   start new `claude --bg` sessions on any machine.
 - **Terminal**: attach read-only (or take control) to any tmux pane.

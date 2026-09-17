@@ -18,10 +18,11 @@
       <span class="age muted">{ago(s.updated_at)}</span>
     </div>
     {#if !child}<div class="mid muted small">{x.title && s.name ? `${s.name} · ` : ''}{shortCwd(s.cwd)}</div>{/if}
-    {#if model || x.effort || ctx}
+    {#if model || x.effort || ctx || x.subagents?.total}
       <div class="facts small">
         {#if model}<span class="fact" title="model">{model}{x.fast_mode ? ' · fast' : ''}</span>{/if}
         {#if x.effort}<span class="fact" title="thinking depth">think {x.effort}</span>{/if}
+        {#if x.subagents?.total}<span class="fact" class:running={x.subagents.running > 0} title="sub-agents inside this session">⑂ {x.subagents.running > 0 ? `${x.subagents.running}/${x.subagents.total}` : x.subagents.total}</span>{/if}
         {#if ctx}
           <span class="fact ctx" class:amber={ctx.pct >= 70} class:red={ctx.pct >= 85} title={`context window${ctx.window ? ` of ${ctx.window}` : ''}`}>
             <span class="cbar"><span style={`width:${Math.min(100, ctx.pct)}%`}></span></span>{ctx.pct.toFixed(0)}%{ctx.window ? ` of ${ctx.window}` : ''}
@@ -50,6 +51,7 @@
   .age { margin-left: auto; font-size: 13px; white-space: nowrap; flex: none; }
   .facts { display: flex; flex-wrap: wrap; gap: 3px 10px; margin-top: 3px; color: var(--muted); font-size: 12px; }
   .fact { white-space: nowrap; }
+  .fact.running { color: var(--cobalt); font-weight: 600; }
   .ctx { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
   .cbar { width: 34px; height: 4px; border-radius: 2px; background: var(--hairline); overflow: hidden; }
   .cbar span { display: block; height: 100%; background: var(--muted); }

@@ -10,7 +10,8 @@
   import History from './components/History.svelte'
   import NewSession from './components/NewSession.svelte'
   import Limits from './components/Limits.svelte'
-  import TerminalView from './components/Terminal.svelte'
+  // the terminal brings xterm.js (a third of the bundle): fetched only when one is opened
+  const terminalView = () => import('./components/Terminal.svelte')
   import Overview from './components/Overview.svelte'
   import PersonalBriefing from './components/PersonalBriefing.svelte'
 
@@ -75,7 +76,7 @@
         {:else if route.page === 'limits'}
           <Limits />
         {:else if route.page === 'terminal' && route.key}
-          <TerminalView key={route.key} />
+          {#await terminalView() then T}<T.default key={route.key} />{/await}
         {:else if route.page === 'new'}
           <NewSession machine={route.q?.get('machine') ?? ''} resume={route.q?.get('resume') ?? ''} title={route.q?.get('cwd') ?? ''} />
         {:else if route.key}
@@ -95,7 +96,7 @@
     {:else if route.page === 'limits'}
       <Limits />
     {:else if route.page === 'terminal' && route.key}
-      <TerminalView key={route.key} />
+      {#await terminalView() then T}<T.default key={route.key} />{/await}
     {:else if route.page === 'new'}
       <NewSession machine={route.q?.get('machine') ?? ''} resume={route.q?.get('resume') ?? ''} title={route.q?.get('cwd') ?? ''} />
     {:else if route.page === 'session' && route.key}

@@ -324,6 +324,12 @@ async def test_titler_renames_only_when_the_request_changes():
         async def set_title(self, key, title, basis):
             self.saved[key] = title
 
+        async def delete_title(self, key):
+            self.saved.pop(key, None)
+
+        async def get_setting(self, key):
+            return {}
+
     class State:
         def __init__(self, db):
             self.db, self.nodes, self.calls = db, {"m1": object()}, []
@@ -357,6 +363,16 @@ async def test_titler_renames_only_when_the_request_changes():
     titler.last_run = 0
     assert await titler.tick(state, agents) == 1 and len(state.calls) == 2
     assert await titler.tick(state, ck.agent_settings({"titles": {"enabled": False}})) == 0
+    # a name the owner typed is never overwritten; clearing it hands naming back
+    await titler.rename(state.db, a.key, "  My own name ")
+    a.extra["last_user"] = "yet another topic"
+    titler.last_run = 0
+    assert await titler.tick(state, agents) == 0 and titler.titles[a.key] == "My own name"
+    await titler.rename(state.db, a.key, "")
+    assert (
+        await titler.tick(state, agents) == 1
+        and state.calls[-1]["endpoints"][0]["id"] == "openrouter"
+    )
 
 
 def test_slim_cuts_only_folded_tool_payloads():

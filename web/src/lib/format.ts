@@ -14,15 +14,15 @@ export function shortCwd(cwd: string | null | undefined): string {
 }
 
 export function statusLabel(s: string, waitingFor = '', goal = false): string {
-  if (goal && s === 'busy') return 'busy · pursuing a goal'
-  if (goal && s === 'idle') return 'idle · goal still open'
+  if (goal && s === 'busy') return 'working · pursuing a goal'
+  if (goal && s === 'idle') return 'your turn · goal still open'
   switch (s) {
     case 'waiting':
       return waitingFor ? `waiting for you: ${waitingFor}` : 'waiting for you'
     case 'busy':
-      return 'busy'
+      return 'working'
     case 'idle':
-      return 'idle'
+      return 'your turn'
     case 'done':
       return 'finished'
     case 'offline':

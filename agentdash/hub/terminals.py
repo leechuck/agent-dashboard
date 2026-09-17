@@ -54,8 +54,13 @@ async def browser_terminal(ws: WebSocket, session_key: str) -> None:
         return
     sess = await state.db.get_session(session_key)
     tmux = (sess.extra.get("tmux") if sess else None) or {}
+    parts = session_key.split(":", 3)
+    if not tmux and len(parts) == 4 and parts[1] == "tmux":
+        # a pane the roster has not listed yet (a session started seconds ago):
+        # "<machine>:tmux:<tmux server name>:<target>"
+        tmux = {"socket": parts[2], "target": parts[3]}
     link = state.node_for(session_key)
-    if not sess or not tmux or not link:
+    if not tmux or not link:
         await ws.close(code=4404)
         return
     await ws.accept()
