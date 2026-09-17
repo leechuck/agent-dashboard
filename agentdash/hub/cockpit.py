@@ -402,7 +402,8 @@ def analyse(
         line = (s.last_line or "").lower()
         if "out of usage credits" not in line and "usage limit reached" not in line:
             continue
-        model = s.model.split("/")[-1] or "that model"
+        raw = s.model.split("/")[-1]
+        model = raw if raw and raw.isascii() and raw[0].isalnum() else "its model"
         out.append(
             Finding(
                 id=f"blocked:{s.key}",

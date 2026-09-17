@@ -100,6 +100,14 @@ class Database:
             "CREATE INDEX IF NOT EXISTS usage_paw "
             "ON usage_snapshots(provider, account, window, fetched_at)"
         )
+        # the two Claude windows were renamed when per-model limits arrived; carry the
+        # history over so the sparklines keep their past and nothing shows up twice
+        for old, new in (("five_hour", "session"), ("seven_day", "weekly")):
+            await self.db.execute(
+                "UPDATE usage_snapshots SET window=?, data=json_set(data, '$.window', ?) "
+                "WHERE provider='anthropic' AND window=?",
+                (new, new, old),
+            )
         await self.db.commit()
 
     async def close(self) -> None:
