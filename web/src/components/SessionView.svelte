@@ -10,6 +10,7 @@
   let { key }: { key: string } = $props()
   const session = $derived(fleet.sessions[key])
   const messages = $derived(fleet.messages[key] ?? [])
+  const loading = $derived(!fleet.messages[key] || !!fleet.loadingMessages[key])
   const x = $derived((session?.extra ?? {}) as Record<string, any>)
   const ctx = $derived(session ? contextOf(session) : null)
   const parent = $derived(x.parent ? fleet.sessions[x.parent] : undefined)
@@ -98,11 +99,11 @@
   <div class="list" bind:this={list} onscroll={onScroll}>
     {#if visible.length === 0}
       <p class="notice muted">
-        {session.transcript_path ? 'No messages yet.' : 'No transcript is available for this session.'}
+        {#if !session.transcript_path}No transcript is available for this session.{:else if loading}<span class="spin"></span> Loading transcript…{:else}No messages yet.{/if}
       </p>
     {/if}
     {#each visible as m (m.id)}
-      <MessageItem {m} />
+      <MessageItem {m} sessionKey={key} />
     {/each}
   </div>
 
@@ -134,6 +135,8 @@
   .tools label { display: inline-flex; gap: 4px; align-items: center; }
   .list { padding: 8px 0 16px; }
   .notice { padding: 16px; }
+  .spin { display: inline-block; width: 11px; height: 11px; margin-right: 6px; border: 2px solid var(--hairline); border-top-color: var(--cobalt); border-radius: 50%; vertical-align: -1px; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   @media (min-width: 960px) {
     /* the pane is a column: switcher and header take what they need, the transcript the rest */
     .sv { height: 100%; display: flex; flex-direction: column; }

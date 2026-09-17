@@ -12,7 +12,7 @@ from sse_starlette.sse import EventSourceResponse
 from ..models import now_ms as _now
 from . import cockpit as ck
 from .auth import require_web_token
-from .state import HubState
+from .state import HubState, slim
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_web_token)])
 
@@ -125,7 +125,16 @@ async def session_messages(key: str, request: Request):
             if key in st.caches:
                 break
             await asyncio.sleep(0.1)
-    return [m.model_dump() for m in st.caches.get(key, [])]
+    return [slim(m.model_dump()) for m in st.caches.get(key, [])]
+
+
+@router.get("/sessions/{key}/message")
+async def session_message(key: str, id: str, request: Request):
+    """One message in full (the list carries long tool calls and results cut short)."""
+    for m in _state(request).caches.get(key, []):
+        if m.id == id:
+            return m.model_dump()
+    raise HTTPException(404, "message is no longer cached")
 
 
 class PromptBody(BaseModel):

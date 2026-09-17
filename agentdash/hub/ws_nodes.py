@@ -23,7 +23,7 @@ from ..models import (
     UsageWindow,
     now_ms,
 )
-from .state import HubState, NodeLink
+from .state import HubState, NodeLink, slim
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -82,6 +82,7 @@ async def nodes_ws(ws: WebSocket) -> None:
                     {"server_time": now_ms(), "armed": m.armed, "armed_until": m.armed_until},
                 )
                 log.info("node %s connected", m.id)
+                await state.resubscribe(m.id)
                 continue
             if link is None:
                 continue
@@ -95,16 +96,20 @@ async def nodes_ws(ws: WebSocket) -> None:
                 for s in changed:
                     state.bus.publish("session.updated", s.model_dump())
                     await state.on_session_transition(s, previous.get(s.key))
+                await state.prewarm(link.machine, sessions)
             elif frame.type == NODE_MESSAGES:
                 key = p.get("session_key", "")
                 msgs = [Message.model_validate(m) for m in p.get("messages", [])]
                 reset = bool(p.get("reset"))
                 state.cache_messages(key, msgs, reset)
+                # a first batch is a whole transcript: with every live session kept warm,
+                # broadcasting those would flood each browser. Pages that hold this
+                # transcript are told to fetch it again; the rest ask when they need it.
                 state.bus.publish(
                     "session.messages",
                     {
                         "session_key": key,
-                        "messages": [m.model_dump() for m in msgs],
+                        "messages": [] if reset else [slim(m.model_dump()) for m in msgs],
                         "reset": reset,
                     },
                 )

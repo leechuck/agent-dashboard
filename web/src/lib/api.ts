@@ -16,6 +16,7 @@ export const api = {
   sessions: (active = false) => j<Session[]>(`/api/sessions?active=${active}`),
   session: (key: string) => j<Session>(`/api/sessions/${encodeURIComponent(key)}`),
   messages: (key: string) => j<Message[]>(`/api/sessions/${encodeURIComponent(key)}/messages`),
+  message: (key: string, id: string) => j<Message>(`/api/sessions/${encodeURIComponent(key)}/message?id=${encodeURIComponent(id)}`),
   prompt: (key: string, text: string) =>
     j<{ ok: boolean; error?: string }>(`/api/sessions/${encodeURIComponent(key)}/prompt`, {
       method: 'POST',

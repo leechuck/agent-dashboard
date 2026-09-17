@@ -24,8 +24,12 @@
     onsend(text.trim())
     text = ''
   }
+  // with a real keyboard Enter sends and Shift+Enter breaks the line; on a touch keyboard
+  // Enter has to stay a line break, so the button (or Ctrl+Enter) sends there
+  const touch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
   function key(e: KeyboardEvent) {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(e)
+    if (e.key !== 'Enter' || e.isComposing) return
+    if (e.metaKey || e.ctrlKey || (!touch && !e.shiftKey)) submit(e)
   }
 </script>
 
@@ -33,7 +37,7 @@
   <textarea rows="2" bind:value={text} placeholder={disabled ? hint : 'Send a message to this session'} {disabled} onkeydown={key}></textarea>
   <div class="actions">
     <span class="small muted">
-      {#if sendState === 'sending'}Sending…{:else if sendState === 'sent'}Delivered.{:else if sendState === 'failed'}Not delivered: {error}{:else if !disabled}Ctrl+Enter sends.{/if}
+      {#if sendState === 'sending'}Sending…{:else if sendState === 'sent'}Delivered.{:else if sendState === 'failed'}Not delivered: {error}{:else if !disabled}{touch ? 'Ctrl+Enter or the button sends.' : 'Enter sends, Shift+Enter for a new line.'}{/if}
     </span>
     <button class="primary" type="submit" disabled={disabled || !text.trim()}>Send</button>
   </div>

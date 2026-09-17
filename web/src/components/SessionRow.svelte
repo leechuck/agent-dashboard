@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Session } from '../lib/types'
+  import { fleet } from '../lib/store.svelte'
   import { ago, backendLabel, displayName, contextOf, modelLabel, shortCwd, statusLabel } from '../lib/format'
   let { session, selected, child = false }: { session: Session; selected: boolean; child?: boolean } = $props()
   const s = $derived(session)
@@ -10,7 +11,7 @@
 </script>
 
 <li class={`row ${s.status}`} class:selected class:child>
-  <a href={`#/session/${encodeURIComponent(s.key)}`}>
+  <a href={`#/session/${encodeURIComponent(s.key)}`} onpointerenter={() => fleet.openSession(s.key)}>
     <div class="top">
       <span class="name">{displayName(s)}</span>
       <span class="harness">{backendLabel(s)}{x.tmux && s.harness !== 'tmux' ? ' · tmux' : ''}</span>

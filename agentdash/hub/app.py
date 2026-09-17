@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from ..config import get_settings
 from ..db import Database
@@ -83,6 +84,8 @@ def create_app() -> FastAPI:
     app.state.settings = settings
     app.state.hub = HubState(db, bus, Pusher(settings.state_dir, settings.push_subject))
     app.add_middleware(ClientGuard, cidrs=settings.hub_allowed_cidrs)
+    # the hub is often far from the browser: JSON shrinks 5-10x (event streams are exempt)
+    app.add_middleware(GZipMiddleware, minimum_size=800)
     app.include_router(api_router)
     app.include_router(ws_router)
     app.include_router(history_router)

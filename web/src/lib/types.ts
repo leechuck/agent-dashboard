@@ -68,6 +68,8 @@ export interface Message {
   is_error: boolean
   is_meta: boolean
   agent_id: string
+  /** long tool input or output was cut for the list; the full message is fetched on open */
+  slim?: boolean
 }
 
 export interface BusEvent {

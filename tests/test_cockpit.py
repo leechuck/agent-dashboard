@@ -357,3 +357,46 @@ async def test_titler_renames_only_when_the_request_changes():
     titler.last_run = 0
     assert await titler.tick(state, agents) == 1 and len(state.calls) == 2
     assert await titler.tick(state, ck.agent_settings({"titles": {"enabled": False}})) == 0
+
+
+def test_slim_cuts_only_folded_tool_payloads():
+    from agentdash.hub.state import SLIM_CHARS, slim
+
+    big = "x" * 5000
+    use = slim(
+        {"kind": "tool_use", "text": "", "tool_input": {"command": big, "n": 3, "edits": [big]}}
+    )
+    assert (
+        use["slim"]
+        and len(use["tool_input"]["command"]) == SLIM_CHARS
+        and use["tool_input"]["n"] == 3
+    )
+    assert isinstance(use["tool_input"]["edits"], str)
+    assert slim({"kind": "tool_result", "text": big})["text"] == big[:SLIM_CHARS]
+    said = {"kind": "text", "text": big}
+    assert slim(said) is said and "slim" not in slim({"kind": "tool_result", "text": "short"})
+
+
+def test_read_last_reads_the_tail_and_grows_until_it_has_enough(tmp_path):
+    import json
+
+    from agentdash.node.adapters.claude_transcript import read_last
+
+    p = tmp_path / "t.jsonl"
+    with p.open("w") as f:
+        for i in range(400):
+            f.write(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "uuid": f"u{i}",
+                        "message": {"role": "user", "content": f"msg {i} " + "y" * 200},
+                    }
+                )
+                + "\n"
+            )
+    whole = read_last(p, 50, chunk=10_000_000)
+    tail = read_last(p, 50, chunk=1_000)  # far too small at first: must double its way up
+    assert [m.id for m in tail] == [m.id for m in whole] and len(tail) == 50
+    assert tail[-1].text.startswith("msg 399")
+    assert len(read_last(p, 1000, chunk=1_000)) == 400

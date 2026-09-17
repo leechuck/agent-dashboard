@@ -1,8 +1,24 @@
 <script lang="ts">
   import type { Message } from '../lib/types'
   import { clock } from '../lib/format'
-  let { m }: { m: Message } = $props()
+  import { fleet } from '../lib/store.svelte'
+  let { m, sessionKey = '' }: { m: Message; sessionKey?: string } = $props()
   let open = $state(false)
+  let fetching = $state(false)
+  /** Long tool calls and results arrive cut short; opening one fetches the rest. */
+  async function toggle() {
+    open = !open
+    if (open && m.slim && sessionKey && !fetching) {
+      fetching = true
+      try {
+        await fleet.fullMessage(sessionKey, m.id)
+      } catch {
+        /* keep the short version */
+      } finally {
+        fetching = false
+      }
+    }
+  }
 
   function summary(m: Message): string {
     const i = m.tool_input ?? {}
@@ -28,22 +44,22 @@
   </div>
 {:else if m.kind === 'tool_use'}
   <div class="tool">
-    <button class="tline" onclick={() => (open = !open)}>
+    <button class="tline" onclick={toggle}>
       <span class="tname">{m.tool_name}</span>
       <span class="tsum mono">{summary(m)}</span>
     </button>
     {#if open}
-      <pre class="mono detail">{JSON.stringify(m.tool_input, null, 2)}</pre>
+      <pre class="mono detail">{JSON.stringify(m.tool_input, null, 2)}{m.slim ? (fetching ? '\n… loading the rest' : '\n… cut short') : ''}</pre>
     {/if}
   </div>
 {:else if m.kind === 'tool_result'}
   <div class="tool result" class:error={m.is_error}>
-    <button class="tline" onclick={() => (open = !open)}>
+    <button class="tline" onclick={toggle}>
       <span class="tname muted">{m.is_error ? 'error' : 'result'}</span>
       <span class="tsum mono">{m.text.split('\n')[0].slice(0, 120)}</span>
     </button>
     {#if open}
-      <pre class="mono detail">{m.text}</pre>
+      <pre class="mono detail">{m.text}{m.slim ? (fetching ? '\n… loading the rest' : '\n… cut short') : ''}</pre>
     {/if}
   </div>
 {:else}

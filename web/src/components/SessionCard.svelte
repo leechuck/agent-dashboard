@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Session } from '../lib/types'
+  import { fleet } from '../lib/store.svelte'
   import { ago, backendLabel, contextOf, displayName, modelLabel, shortCwd, statusLabel } from '../lib/format'
   let { session, kids = [], selected = false }: { session: Session; kids?: Session[]; selected?: boolean } = $props()
   const s = $derived(session)
@@ -21,7 +22,7 @@
 </script>
 
 <article class={`card ${s.status}`} class:stale class:selected>
-  <a class="main" href={href(s.key)}>
+  <a class="main" href={href(s.key)} onpointerenter={() => fleet.openSession(s.key)} ontouchstart={() => fleet.openSession(s.key)}>
     <header>
       <span class={`dot ${s.status}`}></span>
       <span class="state">{stale ? 'stale' : statusLabel(s.status, s.waiting_for, !!x.goal)}</span>

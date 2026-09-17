@@ -30,6 +30,33 @@ from .bus import EventBus
 from .cockpit import Briefer, Titler
 from .push import Pusher
 
+SLIM_CHARS = 400
+
+
+def slim(m: dict[str, Any]) -> dict[str, Any]:
+    """A message as the transcript list needs it. Tool calls and results are shown folded
+    to one line, and they are most of the bytes; the full message is fetched when opened."""
+    if m.get("kind") not in ("tool_use", "tool_result"):
+        return m
+    out, cut = dict(m), False
+    text = out.get("text") or ""
+    if len(text) > SLIM_CHARS:
+        out["text"], cut = text[:SLIM_CHARS], True
+    ti = out.get("tool_input")
+    if isinstance(ti, dict):
+        small = {}
+        for k, v in ti.items():
+            if isinstance(v, str) and len(v) > SLIM_CHARS:
+                small[k], cut = v[:SLIM_CHARS], True
+            elif isinstance(v, (dict, list)) and len(str(v)) > SLIM_CHARS:
+                small[k], cut = str(v)[:SLIM_CHARS], True
+            else:
+                small[k] = v
+        out["tool_input"] = small
+    if cut:
+        out["slim"] = True
+    return out
+
 
 @dataclass
 class NodeLink:
@@ -69,6 +96,35 @@ class HubState:
             link.subscriptions.discard(session_key)
             await link.send(HUB_UNSUBSCRIBE, {"session_key": session_key})
         self.caches.pop(session_key, None)
+
+    async def prewarm(self, machine: str, sessions: list[Any], limit: int = 24) -> None:
+        """Keep the transcripts of live sessions cached, so opening one is instant.
+
+        Sub-agents, stale and finished sessions are fetched only when someone opens them.
+        """
+        link = self.nodes.get(machine)
+        if not link:
+            return
+        cutoff = now_ms() - 48 * 3600 * 1000
+        want = [
+            s.key
+            for s in sorted(sessions, key=lambda s: -s.updated_at)
+            if s.status in ("busy", "idle", "waiting")
+            and s.transcript_path
+            and not s.extra.get("parent")
+            and (s.status == "busy" or s.updated_at > cutoff)
+        ][:limit]
+        for key in want:
+            await self.ensure_subscribed(key)
+        gone = {s.key for s in sessions if s.status not in ("busy", "idle", "waiting")}
+        for key in [k for k in link.subscriptions if k in gone]:
+            await self.unsubscribe(key)
+
+    async def resubscribe(self, machine: str) -> None:
+        """A node that reconnected has forgotten what it was tailing; cached transcripts
+        would silently stop updating."""
+        for key in [k for k in self.caches if k.split(":", 1)[0] == machine]:
+            await self.ensure_subscribed(key)
 
     def cache_messages(self, session_key: str, msgs: list[Message], reset: bool) -> None:
         cache = self.caches.setdefault(session_key, deque(maxlen=2000))

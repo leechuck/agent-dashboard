@@ -178,15 +178,32 @@ class TranscriptTail:
         return list(self._parser(line.decode("utf-8", "replace") for line in lines))
 
 
-def read_last(path: Path, n: int, parser=None) -> list[Message]:
-    """Parse the whole file and keep the last n messages (initial load)."""
+def read_last(path: Path, n: int, parser=None, chunk: int = 2_000_000) -> list[Message]:
+    """The last n messages, for the first view of a session.
+
+    Long sessions reach tens of megabytes; parsing all of it took seconds. Read from the
+    end instead, doubling the window until it holds n messages or the whole file.
+    """
     parser = parser or iter_messages
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as f:
-            msgs = list(parser(iter(f)))
-    except FileNotFoundError:
+        size = path.stat().st_size
+    except OSError:
         return []
-    return msgs[-n:]
+    while True:
+        start = max(0, size - chunk)
+        try:
+            with path.open("rb") as f:
+                f.seek(start)
+                data = f.read()
+        except OSError:
+            return []
+        lines = data.split(b"\n")
+        if start > 0:
+            lines = lines[1:]  # the first line is cut in half
+        msgs = list(parser(line.decode("utf-8", "replace") for line in lines))
+        if len(msgs) >= n or start == 0 or chunk >= 64_000_000:
+            return msgs[-n:]
+        chunk *= 2
 
 
 def tail_facts(path: Path, max_bytes: int = 200_000) -> dict[str, Any]:

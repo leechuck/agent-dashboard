@@ -23,6 +23,7 @@ export class Fleet {
       this.decisions = Object.fromEntries(ds.map((d) => [d.id, d]))
       this.usage = us
       this.loaded = true
+      this.prefetch()
       this.error = ''
     } catch (e) {
       this.error = String(e)
@@ -52,8 +53,20 @@ export class Fleet {
       void this.loadCockpit(false)
     } else if (e.kind === 'session.messages') {
       const { session_key, messages, reset } = e.data as { session_key: string; messages: Message[]; reset: boolean }
-      const cur = reset ? [] : (this.messages[session_key] ?? [])
-      this.messages[session_key] = [...cur, ...messages].slice(-2000)
+      if (!this.messages[session_key]) {
+        // being fetched right now: keep what arrives meanwhile, it is merged after the fetch
+        if (this.inflight.has(session_key) && !reset) (this.early[session_key] ??= []).push(...messages)
+        return // otherwise not held here: fetched whole when it is opened
+      }
+      if (reset) {
+        // the hub replaced its copy (node reconnected): take the fresh one
+        delete this.messages[session_key]
+        void this.openSession(session_key)
+      } else {
+        const have = new Set(this.messages[session_key].map((m) => m.id))
+        const fresh = messages.filter((m) => !have.has(m.id))
+        this.messages[session_key] = [...this.messages[session_key], ...fresh].slice(-2000)
+      }
     }
   }
 
@@ -76,17 +89,69 @@ export class Fleet {
     }
   }
 
-  async openSession(key: string) {
-    if (this.messages[key]?.length) return
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const msgs = await api.messages(key)
-      if (msgs.length || this.messages[key]?.length) {
-        if (!this.messages[key]?.length) this.messages[key] = msgs
-        return
+  /** Session keys whose transcript is being fetched right now. */
+  loadingMessages = $state<Record<string, boolean>>({})
+  private inflight = new Map<string, Promise<void>>()
+  private early: Record<string, Message[]> = {}
+
+  /** Fetch a transcript once and keep it; live updates arrive over the event stream.
+      Safe to call early (hover, idle prefetch): concurrent calls share one request. */
+  openSession(key: string): Promise<void> {
+    if (this.messages[key]) return Promise.resolve()
+    const running = this.inflight.get(key)
+    if (running) return running
+    this.loadingMessages[key] = true
+    const p = (async () => {
+      try {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const msgs = await api.messages(key)
+          if (msgs.length || this.messages[key]?.length) {
+            if (!this.messages[key]?.length) this.messages[key] = msgs
+            return
+          }
+          if (attempt < 2) await new Promise((r) => setTimeout(r, 1500))
+        }
+        this.messages[key] ??= []
+      } catch {
+        /* the view offers a retry by reopening */
+      } finally {
+        const late = this.early[key]
+        delete this.early[key]
+        if (late?.length && this.messages[key]) {
+          const have = new Set(this.messages[key].map((m) => m.id))
+          this.messages[key] = [...this.messages[key], ...late.filter((m) => !have.has(m.id))]
+        }
+        this.inflight.delete(key)
+        delete this.loadingMessages[key]
       }
-      await new Promise((r) => setTimeout(r, 2500))
+    })()
+    this.inflight.set(key, p)
+    return p
+  }
+
+  /** Warm the transcripts someone is likely to open, one after another, when the page is idle. */
+  prefetch(limit = 8) {
+    const keys = this.sessionList
+      .filter((s) => ['busy', 'idle', 'waiting'].includes(s.status) && !Fleet.isStale(s) && !(s.extra as any)?.parent && s.transcript_path)
+      .slice(0, limit)
+      .map((s) => s.key)
+    const next = async () => {
+      const key = keys.shift()
+      if (!key) return
+      await this.openSession(key)
+      setTimeout(next, 150)
     }
-    this.messages[key] ??= []
+    const idle = (window as any).requestIdleCallback as ((cb: () => void) => void) | undefined
+    if (idle) idle(next)
+    else setTimeout(next, 1200)
+  }
+
+  async fullMessage(key: string, id: string) {
+    const full = await api.message(key, id)
+    const list = this.messages[key]
+    const i = list?.findIndex((m) => m.id === id) ?? -1
+    if (list && i >= 0) list[i] = full
+    return full
   }
 
   /** Whether the dashboard itself can deliver a prompt (Claude inbox socket, pi extension). */
