@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     # personal briefing: the PA repo on this machine, and the Emacs that owns mail
     pa_dir: Path = Path.home() / "pa"
     pa_emacs_server: str = "gnus"
+    pa_reminder_minutes: int = 10  # how often todos are checked for a push; 0 = never
     pa_helpers_el: Path = Path.home() / "Public/software/skills/local/email-contacts/helpers.el"
 
     @property

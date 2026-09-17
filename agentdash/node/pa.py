@@ -13,6 +13,7 @@ import json
 import logging
 import re
 import tempfile
+from datetime import datetime
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -21,7 +22,9 @@ import yaml
 
 from ..config import Settings
 from ..models import Session, now_ms
+from . import pa_reminders
 from .adapters.claude_cli import start_background
+from .pa_panels import PanelError, Panels
 
 log = logging.getLogger(__name__)
 
@@ -91,6 +94,7 @@ class PersonalAssistant:
         self.dir = s.pa_dir.expanduser()
         self.file = self.dir / "data" / "dashboard_briefing.json"
         self.state_file = s.state_dir / "pa-state.json"
+        self.panels = Panels(self.dir)
         self._lock = asyncio.Lock()
 
     @property
@@ -142,7 +146,7 @@ class PersonalAssistant:
             pass
         except json.JSONDecodeError as e:
             return {"ok": False, "error": f"dashboard_briefing.json is not valid JSON: {e}"}
-        except PAError as e:
+        except (PAError, PanelError) as e:
             return {"ok": False, "error": str(e)}
         state = self._state()
         if briefing:
@@ -178,6 +182,19 @@ class PersonalAssistant:
         state[item_id] = {"status": status, "note": note[:300], "at": now_ms()}
         self._save_state(state)
         return {"ok": True, "status": status}
+
+    # ---- reminders ---------------------------------------------------
+    async def due_reminders(self, now: datetime | None = None) -> list[dict[str, str]]:
+        """Pushes for todos that became due, each announced once (pa_reminders.plan)."""
+        if not self.available:
+            return []
+        data = await self.panels.run_json(["todo.py", "due-now", "--json"], 30)
+        state = self._state()
+        seen = state.get("_reminders", {}).get("seen") or {}
+        pushes, seen = pa_reminders.plan(data.get("items") or [], seen, now or datetime.now())
+        state["_reminders"] = {"seen": seen, "at": now_ms()}
+        self._save_state(state)
+        return pushes
 
     # ---- running the agent -------------------------------------------
     async def run(
@@ -314,6 +331,10 @@ class PersonalAssistant:
                 return await asyncio.to_thread(self.get, sessions)
             if not self.available:
                 return {"ok": False, "error": "no pa"}
+            if op == "panel":
+                return await self.panels.panel(str(p.get("name")), bool(p.get("fresh")))
+            if op == "act":
+                return await self.panels.act(str(p.get("act")), p.get("args") or {})
             if op == "run":
                 return await self.run(sessions, str(p.get("focus") or ""), p.get("agent"))
             if op == "send_email":
@@ -326,5 +347,5 @@ class PersonalAssistant:
             if op == "mark":
                 return self.mark(str(p.get("id")), str(p.get("status")), str(p.get("note") or ""))
             return {"ok": False, "error": f"unknown op {op}"}
-        except PAError as e:
+        except (PAError, PanelError) as e:
             return {"ok": False, "error": str(e)}

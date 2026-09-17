@@ -1,0 +1,84 @@
+# Personal tab panels: what the node expects from the PA repo
+
+The Personal tab is served by scripts in `<pa_dir>/scripts/` (ADR 0007). The node
+(`agentdash/node/pa_panels.py`) runs them with the Python it runs under, in `<pa_dir>`,
+without a shell, and reads one JSON object from stdout. This file is the contract; the
+scripts and their tests live in the PA repo.
+
+Rules for every script:
+
+- `--json` prints exactly one JSON object with `"ok": true|false`; on failure `"error"` is
+  a sentence a person can act on. Exit status non-zero on failure.
+- No prompts, no reading from stdin, finishes well inside the timeout listed below.
+- Nothing is sent to anybody. Scripts that write (todo, calendar) change only Robert's own
+  files and calendars.
+- Free text from the browser arrives as ONE argument after `--`; the script treats it as
+  data (one line, tags stripped), never as options or markup.
+
+## Panels (`GET /api/pa/panel/{name}`, add `?fresh=true` to skip the node's cache)
+
+| panel | command | cached | timeout |
+|---|---|---|---|
+| `todo` | `todo.py list --json` | 20 s | 30 s |
+| `agenda` | `agenda.py show --json --days 7` | 5 min | 75 s |
+
+### `todo`
+
+```
+{ "ok": true, "today": "YYYY-MM-DD",
+  "items": [ { "id": "8 hex", "list": "PA", "date": "YYYY-MM-DD", "status": "open",
+               "title": "...", "body": "...", "snoozed_until": "" | "YYYY-MM-DD",
+               "project": "slug", "project_name": "...", "kind": "research",
+               "bucket": "overdue|today|week|later|snoozed", "days": -3 } ],
+  "lists": ["PA", ...], "counts": {"overdue": 2, ...},
+  "projects": [ {"slug": "...", "name": "...", "kind": "..."} ] }
+```
+
+### `agenda`
+
+```
+{ "ok": true, "source": "gog" | "ics", "warning": "...", "today": "YYYY-MM-DD",
+  "events": [ { "id", "title", "start", "end", "all_day", "calendar", "location", "link",
+                "busy", "guests": 3, "unanswered": false, "flags": ["clashes with X"] } ],
+  "trips": [ {"title": "Travel: ...", "start": "YYYY-MM-DD", "end": "YYYY-MM-DD (exclusive)"} ],
+  "flagged": 2, "calendars": ["personal", "work"] }
+```
+
+Times carry their offset; the page groups `events` by day in the reader's own time zone
+(the script's `days` grouping is for the terminal). Trip blocks are not in `events`.
+
+## Actions (`POST /api/pa/act` with `{"act": "...", "args": {...}}`)
+
+The node validates every argument (ids are 8 hex digits, dates `YYYY-MM-DD`, list and
+project names by pattern, text by length) before anything is run.
+
+| act | args | command |
+|---|---|---|
+| `todo_add` | `date`, `text`, `list?`, `project?` | `todo.py add --json --commit --date D --list L [--project P] -- TEXT` |
+| `todo_done` | `id`, `note?` | `todo.py done --json --commit [--note N] -- ID` |
+| `todo_reopen` | `id` | `todo.py reopen ...` |
+| `todo_snooze` | `id`, `until` | `todo.py snooze ... -- ID UNTIL` |
+| `todo_unsnooze` | `id` | `todo.py unsnooze ...` |
+| `todo_due` | `id`, `date` | `todo.py due ... -- ID DATE` |
+| `calendar_add` | `title`, `start`, `end?`, `minutes?`, `all_day?`, `calendar?`, `reminder?`, `location?` | `agenda.py add --json --title=... --start=...` |
+| `calendar_remind` | `title`, `start`, `calendar?` | `agenda.py remind ...` (5 minutes, popup at the start) |
+| `todo_sync` | | `todo_sync.py sync` (org, Google Tasks, completions pulled back) |
+
+Calendar actions have no field for guests or a description, in the node or in the script:
+an event with guests sends invitations. Timed starts are RFC3339 with an offset (the page
+adds the browser's), all-day events take dates, the last day inclusive.
+
+## Reminders
+
+Every `AGENTDASH_PA_REMINDER_MINUTES` (default 10, 0 turns it off) the node runs
+`todo.py due-now --json` (same item shape as `todo`, only what is due today or overdue and
+not snoozed) and applies the rules in `agentdash/node/pa_reminders.py`: nothing at night,
+one digest on the first check of the day, afterwards one push per item that newly became
+due. What was announced is remembered in `~/.agentdash/pa-state.json`. The push travels
+as a `pa.reminder` event; the hub pushes it on and neither stores nor broadcasts it.
+
+## Trying it without touching real data
+
+Point a development node at a scratch copy: `AGENTDASH_PA_DIR=<scratch>` with a
+`CLAUDE.md`, the scripts and a made-up `deadlines.md`, and `PA_ORG_DIR=<scratch>/org` so
+the org views are not written into the real org directory.

@@ -271,6 +271,25 @@ class HubState:
                 tag=f"fail-{s.key}",
             )
 
+    async def node_event(self, machine: str, p: dict[str, Any]) -> None:
+        """An event frame from a node: the answer to a request, a reminder, or news."""
+        rid = p.get("request_id")
+        if rid and self.resolve(rid, p):
+            return
+        if p.get("kind") == "pa.reminder":
+            # personal text: pushed on to the owner's devices, never stored, never
+            # broadcast to open pages (ADR 0007)
+            await self.notify(
+                str(p.get("title") or "Reminder")[:120],
+                str(p.get("body") or "")[:300],
+                str(p.get("url") or "/#/personal"),
+                tag=str(p.get("tag") or "pa"),
+            )
+            return
+        await self.db.add_event(machine, p.get("session_key", ""), p.get("kind", "event"), p)
+        self.bus.publish("event", {"machine": machine, **p})
+        await self.on_node_event(machine, p)
+
     async def on_node_event(self, machine: str, p: dict[str, Any]) -> None:
         kind = p.get("kind", "")
         prompts = (
