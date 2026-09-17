@@ -35,11 +35,26 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        import asyncio
+
         import httpx
 
         await db.open()
         app.state.history_client = httpx.AsyncClient(timeout=30)
+
+        async def retention() -> None:
+            while True:
+                try:
+                    await db.prune_usage(settings.keep_usage_days * 86400 * 1000)
+                    await db.prune_events(settings.keep_events_days * 86400 * 1000)
+                    await db.prune_decisions(settings.keep_events_days * 86400 * 1000)
+                except Exception:  # noqa: BLE001
+                    logging.getLogger(__name__).exception("retention failed")
+                await asyncio.sleep(6 * 3600)
+
+        task = asyncio.create_task(retention())
         yield
+        task.cancel()
         await app.state.history_client.aclose()
         await db.close()
 

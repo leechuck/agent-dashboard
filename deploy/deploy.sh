@@ -23,16 +23,19 @@ cd ~/Public/software/agent-dashboard
 uv sync --no-dev -q
 mkdir -p ~/.config/systemd/user ~/.agentdash
 units="agentdash-node.service"
-[ "$role" = hub ] && units="$units agentdash-hub.service agentsview.service agentsview-sync.service agentsview-sync.timer"
+[ "$role" = hub ] && units="$units agentdash-hub.service"
+# agentsview units only where the binary exists (the history host)
+[ "$role" = hub ] && [ -x ~/.local/bin/agentsview ] && units="$units agentsview.service agentsview-mirror@.service agentsview-mirror@.timer"
 for u in $units; do cp deploy/systemd/$u ~/.config/systemd/user/$u; done
 systemctl --user daemon-reload
 for u in $units; do
   case $u in
-    agentsview-sync.service) ;;  # oneshot, driven by its timer
+    agentsview-sync.service|agentsview-mirror@.service) ;;  # oneshot, driven by timers
     *.service) systemctl --user enable "$u" >/dev/null 2>&1 || true; systemctl --user restart "$u" 2>/dev/null || true;;
+    *@.timer) ;;  # template timers are enabled per instance by hand
     *.timer) systemctl --user enable --now "$u" >/dev/null;;
   esac
 done
 sleep 2
-for u in $units; do printf '%-26s %s\n' "$u" "$(systemctl --user is-active "$u")"; done
+for u in $units; do case $u in *@.*) continue;; esac; printf '%-26s %s\n' "$u" "$(systemctl --user is-active "$u")"; done
 REMOTE

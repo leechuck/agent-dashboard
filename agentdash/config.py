@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     history_url: str = "http://127.0.0.1:8080"  # agentsview API, proxied under /history
     history_token: str = ""
     history_public_url: str = ""  # agentsview UI as reachable from the phone (deep links)
+    keep_usage_days: int = 30
+    keep_events_days: int = 90
 
     # node
     hub_url: str = "ws://127.0.0.1:8790/nodes"

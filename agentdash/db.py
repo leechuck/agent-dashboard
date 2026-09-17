@@ -241,6 +241,18 @@ class Database:
         )
         return [(r["fetched_at"], r["used_pct"]) for r in await cur.fetchall()]
 
+    async def prune_events(self, keep_ms: int) -> None:
+        await self.db.execute("DELETE FROM events WHERE ts < ?", (now_ms() - keep_ms,))
+        await self.db.commit()
+
+    async def prune_decisions(self, keep_ms: int) -> None:
+        await self.db.execute(
+            "DELETE FROM decisions WHERE status != 'pending' AND created_at < ?",
+            (now_ms() - keep_ms,),
+        )
+        await self.db.execute("VACUUM")
+        await self.db.commit()
+
     async def prune_usage(self, keep_ms: int) -> None:
         await self.db.execute(
             "DELETE FROM usage_snapshots WHERE fetched_at < ?", (now_ms() - keep_ms,)

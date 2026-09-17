@@ -1,6 +1,0 @@
-[Unit]
-Description=agentsview sync of remote hosts over SSH
-
-[Service]
-Type=oneshot
-ExecStart=%h/.local/bin/agentsview sync

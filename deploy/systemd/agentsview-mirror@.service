@@ -1,0 +1,8 @@
+[Unit]
+Description=Mirror agent session stores from %i for agentsview
+
+[Service]
+Type=oneshot
+ExecStart=%h/Public/software/agent-dashboard/deploy/agentsview-mirror.sh %i
+Nice=10
+IOSchedulingClass=idle
