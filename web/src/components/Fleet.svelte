@@ -85,7 +85,7 @@
           {@const working = kids.filter((k) => k.status === 'busy').length}
           {@const blocked = kids.filter((k) => k.status === 'waiting').length}
           <li class="kids">
-            <button class="kt" onclick={() => (openKids[s.key] = !openKids[s.key])} aria-expanded={!!openKids[s.key]}>
+            <button class="kt" class:open={!!openKids[s.key]} onclick={() => (openKids[s.key] = !openKids[s.key])} aria-expanded={!!openKids[s.key]}>
               <span class="tw">{openKids[s.key] ? '▾' : '▸'}</span>
               {kids.length} sub-agent{kids.length === 1 ? '' : 's'}
               <span class="muted">{working ? `${working} working` : 'none working'}</span>
@@ -97,6 +97,9 @@
                   <SessionRow session={k} selected={k.key === selected} child />
                 {/each}
               </ul>
+              {#if kids.length > 2}
+                <button class="kt end" onclick={() => (openKids[s.key] = false)}><span class="tw">▴</span> Hide {kids.length} sub-agents</button>
+              {/if}
             {/if}
           </li>
         {/if}
@@ -133,6 +136,9 @@
   .kids { border-bottom: 1px solid var(--hairline); background: var(--page); }
   .kt { display: flex; gap: 8px; align-items: center; width: 100%; border: 0; border-radius: 0; background: none; padding: 5px 16px 5px 17px; font-size: 13px; text-align: left; color: var(--ink); }
   .kt:hover { background: var(--surface); }
+  /* an open list can be long: keep its handle in reach under the machine header */
+  .kt.open { position: sticky; top: calc(var(--sticky-top, 48px) + 43px); z-index: 3; background: var(--page); border-bottom: 1px solid var(--hairline); }
+  .kt.end { color: var(--muted); border-top: 1px solid var(--hairline); }
   .tw { width: 10px; color: var(--muted); }
   .blocked { color: var(--signal); font-weight: 500; }
   .kids ul { background: var(--page); }

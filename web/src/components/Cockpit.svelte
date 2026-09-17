@@ -4,6 +4,7 @@
   import { ago } from '../lib/format'
   import { api } from '../lib/api'
   import DecisionCard from './DecisionCard.svelte'
+  import PersonalBriefing from './PersonalBriefing.svelte'
   import type { Finding, Session, Suggestion } from '../lib/types'
 
   const c = $derived(fleet.cockpit)
@@ -22,6 +23,17 @@
   /** Per suggestion: what happened when it was carried out from here. */
   let done = $state<Record<number, { state: 'working' | 'ok' | 'failed'; text: string }>>({})
   let confirmStop = $state(-1)
+  let silencing = $state('') // id whose duration choice is open
+  let showSilenced = $state(false)
+  async function silence(id: string, title: string, hours: number | null) {
+    silencing = ''
+    await api.silence(id, title, hours)
+    await fleet.loadCockpit(false)
+  }
+  async function unsilence(id: string) {
+    await api.unsilence(id)
+    await fleet.loadCockpit(false)
+  }
 
   // On a wide screen the cockpit is one pane of a split view: opening a session in the same
   // tab would replace it, so links go to a new tab. On the phone a new tab leaves the app.
@@ -139,6 +151,20 @@
   const sessionName = (key: string) => fleet.sessions[key]?.name || key.split(':').pop()?.slice(0, 8) || ''
 </script>
 
+{#snippet quiet(id: string, title: string)}
+  {#if silencing === id}
+    <span class="qs">
+      <button onclick={() => silence(id, title, 4)}>4 h</button>
+      <button onclick={() => silence(id, title, 24)}>1 day</button>
+      <button onclick={() => silence(id, title, 168)}>1 week</button>
+      <button onclick={() => silence(id, title, null)}>for good</button>
+      <button class="x" aria-label="cancel" onclick={() => (silencing = '')}>×</button>
+    </span>
+  {:else}
+    <button class="q" title="Stop showing this" onclick={() => (silencing = id)}>Silence</button>
+  {/if}
+{/snippet}
+
 {#snippet findingList(items: Finding[])}
   <ul class="findings">
     {#each items as f (f.id)}
@@ -157,6 +183,7 @@
             {cleaning === f.id ? 'Working…' : f.action.label}{wide && !['cleanup', 'send_prompt'].includes(f.action.type) ? ' ↗' : ''}
           </button>
         {/if}
+        {@render quiet(f.id, f.title)}
       </li>
       {/if}
     {/each}
@@ -248,6 +275,8 @@
                   {#if target_s}<a href={sessionHref(s.session_key)} {target}>Open{wide ? ' ↗' : ''}</a>{/if}
                   {#if s.kind === 'new_session'}<a href="#/new" {target}>New session{wide ? ' ↗' : ''}</a>{/if}
                   {#if s.kind === 'switch_harness'}<a href="#/limits" {target}>Limits{wide ? ' ↗' : ''}</a>{/if}
+                  <span class="push"></span>
+                  {@render quiet(s.id, s.title)}
                 </div>
               </li>
             {/each}
@@ -274,9 +303,27 @@
       {/if}
     </section>
 
+    <PersonalBriefing {wide} />
+
     {#if info.length}
       <h2>Notes</h2>
       {@render findingList(info)}
+    {/if}
+    {#if c.silenced.length}
+      <div class="silenced">
+        <button class="q" onclick={() => (showSilenced = !showSilenced)}>{showSilenced ? '▾' : '▸'} {c.silenced.length} silenced</button>
+        {#if showSilenced}
+          <ul>
+            {#each c.silenced as x (x.id)}
+              <li>
+                <span class="st">{x.title || x.id}</span>
+                <span class="muted small">{x.until ? `until ${new Date(x.until).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : 'for good'}</span>
+                <button onclick={() => unsilence(x.id)}>Restore</button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
     {/if}
     {#if !c.findings.length}
       <p class="muted pad">No findings. Every session is either working or has nothing to ask.</p>
@@ -315,6 +362,18 @@
   .ftitle, .stitle { font-weight: 500; overflow-wrap: anywhere; }
   .fdetail { color: var(--muted); font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
   .findings button { flex: none; font-size: 13px; padding: 4px 10px; white-space: nowrap; }
+  button.q { border-color: transparent; background: none; color: var(--muted); font-size: 12.5px; padding: 4px 6px; }
+  button.q:hover { color: var(--ink); border-color: var(--hairline); }
+  .qs { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .qs button { font-size: 12px; padding: 2px 8px; }
+  .qs .x { border-color: transparent; background: none; color: var(--muted); }
+  .push { flex: 1; }
+  .findings li { flex-wrap: wrap; }
+  .silenced { padding: 14px 16px 0; }
+  .silenced ul { list-style: none; margin: 6px 0 0; padding: 0; }
+  .silenced li { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid var(--hairline); font-size: 13px; }
+  .silenced .st { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+  .silenced li button { font-size: 12px; padding: 2px 8px; }
   .brief { padding: 0 16px; }
   .bhead { display: flex; align-items: baseline; gap: 10px; }
   .bhead h2 { padding-left: 0; }

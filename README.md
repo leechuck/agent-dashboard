@@ -15,6 +15,12 @@ What it does:
   with prompts you can send with one tap, edit first, or copy. The model is the
   local `claude -p` on Sonnet using the subscription login of one node; no API
   key is needed. Nothing is sent until you press Send (ADR 0004).
+- **Personal briefing** (in the Cockpit): starts the personal-assistant agent in
+  `~/pa`, shows what it found across mail, Mattermost, WhatsApp, calendar and
+  deadlines, lets you edit and send its mail drafts through the running Emacs
+  (Gnus) and nothing else, and hands tasks to a running agent or a new one in
+  the right folder (`~/pa/configs/workspaces.yaml`). Findings and suggestions
+  in the Cockpit can be silenced for hours, days or for good (ADR 0005).
 - **Fleet**: live roster per machine, status (busy, idle, waiting for you),
   model, login, thinking depth, context fill, last line. Sub-agents (Claude or
   Codex sessions started by another session) fold under their parent.

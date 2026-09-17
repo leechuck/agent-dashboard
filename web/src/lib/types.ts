@@ -109,6 +109,7 @@ export interface Finding {
 }
 
 export interface Suggestion {
+  id: string
   title: string
   why: string
   kind: string
@@ -131,8 +132,71 @@ export interface Cockpit {
   stats: { busy: number; waiting: number; idle: number; stale: number; subagents: number; machines_online: number; machines: number }
   findings: Finding[]
   headroom: { provider: string; account: string; label: string; used_pct: number; window: string; command: string }[]
+  silenced: { id: string; title: string; until: number }[]
   briefing: Briefing | null
   outdated: boolean
   generating: boolean
   error: string
+}
+
+export interface PADraft {
+  kind: 'email_reply' | 'email_new' | 'mattermost' | 'whatsapp'
+  buffer?: string
+  message_id?: string
+  wide?: boolean
+  to?: string
+  cc?: string
+  subject?: string
+  body: string
+}
+
+export interface PATask {
+  title: string
+  workspace?: string
+  machine?: string
+  path?: string
+  harness?: string
+  prompt: string
+  deadline?: string
+}
+
+export interface PAItem {
+  id: string
+  channel: string
+  urgency: 'now' | 'today' | 'week' | 'fyi'
+  from?: string
+  subject?: string
+  received?: string
+  ask?: string
+  needs_decision?: string
+  link?: string
+  draft?: PADraft | null
+  task?: PATask | null
+  status: 'open' | 'done' | 'ignored' | 'sent' | 'delegated'
+  status_note: string
+}
+
+export interface PAWorkspace {
+  name?: string
+  kind?: string
+  machine?: string
+  path: string
+  note?: string
+}
+
+export interface PAState {
+  ok: boolean
+  error?: string
+  machine?: string
+  briefing: {
+    generated_at?: string
+    file_mtime?: number
+    summary?: string
+    schedule?: { when: string; what: string; note?: string }[]
+    deadlines?: { date: string; what: string; project?: string }[]
+    items: PAItem[]
+  } | null
+  session: { key: string; status: string; name: string } | null
+  workspaces: PAWorkspace[]
+  roots: PAWorkspace[]
 }

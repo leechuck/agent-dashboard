@@ -611,6 +611,7 @@ def digest(
             for w in usage
             if _is_money(w) and isinstance(w.detail.get("remaining"), int | float)
         ],
+        "silenced_by_owner": [],
         "rule_findings": [
             {"severity": f.severity, "title": f.title, "detail": f.detail} for f in findings
         ],
@@ -637,6 +638,7 @@ remaining dollars are low compared with what the fleet burns. Never call credit 
 answering or prompting them; mention them only if they are stuck or wasteful.
 - When a provider has several accounts, say which account new work should use so that no weekly \
 quota expires unused, and name sessions worth moving.
+- "silenced_by_owner" lists things the owner chose not to hear about: do not raise them again.
 - Only put a "prompt" on sessions with can_receive_prompt true, or the owner cannot send it. A prompt \
 that is a slash command (/compact, /clear) only works where can_receive_slash_commands is true; elsewhere \
 say in "why" that the owner has to type it in the terminal, and leave "prompt" empty.
@@ -649,6 +651,14 @@ Reply with JSON only, matching:
 "answer|switch_harness|compact|handoff|fan_out|new_session|stop|other", "session_key": "<key or empty>", \
 "prompt": "optional text to send to that session"}]}
 At most 6 suggestions, most valuable first."""
+
+
+def suggestion_id(s: dict[str, Any]) -> str:
+    """Stable across regenerated briefings: the model rewords titles, not what it means."""
+    if s.get("session_key"):
+        return f"sug:{s.get('kind', 'other')}:{s['session_key']}"
+    words = "".join(c for c in str(s.get("title", "")).lower() if c.isalnum() or c == " ")
+    return "sug:" + hashlib.sha256(words.encode()).hexdigest()[:12]
 
 
 def fingerprint(d: dict[str, Any]) -> str:
@@ -696,6 +706,7 @@ def parse_briefing(text: str) -> dict[str, Any]:
             continue
         sug.append(
             {
+                "id": "",
                 "title": str(x["title"])[:120],
                 "why": str(x.get("why") or "")[:400],
                 "kind": x.get("kind") if x.get("kind") in kinds else "other",
@@ -703,6 +714,8 @@ def parse_briefing(text: str) -> dict[str, Any]:
                 "prompt": str(x.get("prompt") or "")[:1200],
             }
         )
+    for s in sug:
+        s["id"] = suggestion_id(s)
     return {
         "summary": str(raw.get("summary") or "")[:1200],
         "sessions": {

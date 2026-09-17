@@ -52,6 +52,7 @@ from .decisions import DecisionManager
 from .hookserver import serve_hooks
 from .hubclient import HubClient
 from .lineage import link_parents
+from .pa import PersonalAssistant
 from .terminal import TerminalSession
 
 log = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ NOT_ANSWERABLE = {"AskUserQuestion"}
 class Node:
     def __init__(self, settings: Settings) -> None:
         self._tasks: set[asyncio.Task[Any]] = set()
+        self.pa = PersonalAssistant(settings)
         self.parents: dict[str, str] = {}  # session key -> key of the session that spawned it
         self.s = settings
         self.machine = settings.machine_id
@@ -116,6 +118,8 @@ class Node:
             await self.terminal_open(p)
         elif frame.type == "cockpit.brief":
             self._spawn(self.cockpit_brief(p))
+        elif frame.type == "pa.request":
+            self._spawn(self.pa_request(p))
         elif frame.type == HUB_ARM:
             self.armed = bool(p.get("armed"))
             self.armed_until = int(p.get("armed_until") or 0)
@@ -436,6 +440,18 @@ class Node:
         task = asyncio.create_task(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+
+    async def pa_request(self, p: dict[str, Any]) -> None:
+        try:
+            result = await self.pa.handle(p, self.sessions)
+        except Exception as e:  # noqa: BLE001
+            log.exception("pa request failed")
+            result = {"ok": False, "error": f"{e.__class__.__name__}: {e}"[:300]}
+        if p.get("op") == "run":
+            self._refresh.set()
+        await self.hub.send(
+            NODE_EVENT, {"kind": "pa.result", "request_id": p.get("request_id", ""), **result}
+        )
 
     async def cockpit_brief(self, p: dict[str, Any]) -> None:
         result = await briefing.brief(self.s, p.get("system", ""), p.get("digest") or {})

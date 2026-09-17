@@ -23,6 +23,9 @@ from .terminals import router as terminal_router
 from .ws_nodes import router as ws_router
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
+# index.html names the hashed bundles: browsers must ask again after every deploy,
+# or a phone keeps running last week's interface
+_REVALIDATE = {"Cache-Control": "no-cache"}
 
 
 def create_app() -> FastAPI:
@@ -96,9 +99,9 @@ def create_app() -> FastAPI:
 
         @app.get("/{path:path}")
         async def spa(path: str):
-            candidate = STATIC / path
-            if path and candidate.is_file():
-                return FileResponse(candidate)
-            return FileResponse(index)
+            candidate = (STATIC / path).resolve()
+            if path and candidate.is_relative_to(STATIC) and candidate.is_file():
+                return FileResponse(candidate, headers=_REVALIDATE)
+            return FileResponse(index, headers=_REVALIDATE)
 
     return app

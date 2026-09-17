@@ -231,7 +231,10 @@ async def _cockpit_inputs(st: HubState):
         if w.provider != "openrouter"
     }
     findings = ck.analyse(sessions, machines, decisions, usage, history)
-    return sessions, machines, usage, findings
+    silenced = await st.db.silenced()
+    quiet = {x["id"] for x in silenced}
+    findings = [f for f in findings if f.id not in quiet]
+    return sessions, machines, usage, findings, silenced
 
 
 @router.get("/cockpit")
@@ -242,9 +245,10 @@ async def cockpit(request: Request, brief: bool = True):
     so opening the page is what spends model tokens, not the hub idling.
     """
     st = _state(request)
-    sessions, machines, usage, findings = await _cockpit_inputs(st)
+    sessions, machines, usage, findings, silenced = await _cockpit_inputs(st)
     stats = ck.stats(sessions, machines)
     d = ck.digest(sessions, machines, usage, findings)
+    d["silenced_by_owner"] = [x["title"] for x in silenced]
     st.briefer.min_interval = request.app.state.settings.cockpit_min_interval
     st.briefer.preferred = request.app.state.settings.cockpit_node
     if brief and st.nodes:
@@ -257,19 +261,104 @@ async def cockpit(request: Request, brief: bool = True):
         "stats": stats,
         "findings": ck.to_json(findings),
         "headroom": ck.provider_headroom(usage),
-        **st.briefer.view(ck.fingerprint(d)),
+        "silenced": silenced,
+        **_quiet_view(st.briefer.view(ck.fingerprint(d)), silenced),
     }
+
+
+def _quiet_view(view: dict, silenced: list[dict]) -> dict:
+    """The cached briefing without the suggestions the owner silenced."""
+    b = view.get("briefing")
+    if b:
+        quiet = {x["id"] for x in silenced}
+        view = {
+            **view,
+            "briefing": {
+                **b,
+                "suggestions": [s for s in b["suggestions"] if s.get("id") not in quiet],
+            },
+        }
+    return view
+
+
+class SilenceBody(BaseModel):
+    id: str
+    title: str = ""
+    hours: float | None = None  # None = for good
+
+
+@router.post("/cockpit/silence")
+async def cockpit_silence(body: SilenceBody, request: Request):
+    until = int(_now() + body.hours * 3600 * 1000) if body.hours else 0
+    await _state(request).db.silence(body.id, body.title[:200], until)
+    _state(request).bus.publish("cockpit.updated", {})
+    return {"ok": True, "until": until}
+
+
+@router.delete("/cockpit/silence/{item_id:path}")
+async def cockpit_unsilence(item_id: str, request: Request):
+    await _state(request).db.unsilence(item_id)
+    _state(request).bus.publish("cockpit.updated", {})
+    return {"ok": True}
 
 
 @router.post("/cockpit/brief")
 async def cockpit_brief(request: Request):
     """Generate a fresh briefing now and return the result."""
     st = _state(request)
-    sessions, machines, usage, findings = await _cockpit_inputs(st)
+    sessions, machines, usage, findings, silenced = await _cockpit_inputs(st)
     d = ck.digest(sessions, machines, usage, findings)
+    d["silenced_by_owner"] = [x["title"] for x in silenced]
     st.briefer.preferred = request.app.state.settings.cockpit_node
     await st.briefer.refresh(st, d, force=True)
-    return st.briefer.view(ck.fingerprint(d))
+    return _quiet_view(st.briefer.view(ck.fingerprint(d)), silenced)
+
+
+async def _pa(request: Request, payload: dict, timeout: float = 120) -> dict:
+    """Relay to the node that holds the personal-assistant repo. Nothing is stored here."""
+    st = _state(request)
+    s = request.app.state.settings
+    prefer = s.pa_node or s.cockpit_node
+    order = sorted(st.nodes, key=lambda m: (m != prefer, m))
+    if not order:
+        raise HTTPException(503, "no machine is online")
+    for machine in order:
+        try:
+            res = await st.request(st.nodes[machine], "pa.request", payload, timeout=timeout)
+        except TimeoutError as e:
+            raise HTTPException(504, f"{machine} did not answer") from e
+        if res.get("error") != "no pa":
+            return {**res, "machine": machine}
+    return {"ok": False, "error": "no online machine has the personal-assistant repo"}
+
+
+@router.get("/pa")
+async def pa_get(request: Request):
+    return await _pa(request, {"op": "get"}, timeout=30)
+
+
+class PARunBody(BaseModel):
+    focus: str = ""
+
+
+@router.post("/pa/run")
+async def pa_run(body: PARunBody, request: Request):
+    return await _pa(request, {"op": "run", "focus": body.focus})
+
+
+class PAItemBody(BaseModel):
+    id: str
+    op: str  # send_email | discard | mark
+    body: str | None = None
+    status: str = ""
+    note: str = ""
+
+
+@router.post("/pa/item")
+async def pa_item(body: PAItemBody, request: Request):
+    if body.op not in ("send_email", "discard", "mark"):
+        raise HTTPException(400, "unknown operation")
+    return await _pa(request, body.model_dump(), timeout=200)
 
 
 @router.get("/usage")

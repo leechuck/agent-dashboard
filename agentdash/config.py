@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     keep_events_days: int = 90
     cockpit_min_interval: float = 600.0  # seconds between automatic model briefings
     cockpit_node: str = ""  # machine that should run the briefing; others are fallbacks
+    pa_node: str = ""  # machine that holds the personal-assistant repo; default cockpit_node
 
     # node
     hub_url: str = "ws://127.0.0.1:8790/nodes"
@@ -66,6 +67,10 @@ class Settings(BaseSettings):
     cockpit_base_url: str = "https://openrouter.ai/api/v1"
     cockpit_openai_model: str = "anthropic/claude-sonnet-5"
     cockpit_api_key: str = ""  # empty = use OPENROUTER_API_KEY
+    # personal briefing: the PA repo on this machine, and the Emacs that owns mail
+    pa_dir: Path = Path.home() / "pa"
+    pa_emacs_server: str = "gnus"
+    pa_helpers_el: Path = Path.home() / "Public/software/skills/local/email-contacts/helpers.el"
 
     @property
     def state_dir(self) -> Path:

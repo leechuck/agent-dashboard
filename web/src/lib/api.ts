@@ -1,4 +1,4 @@
-import type { BusEvent, Cockpit, Decision, Machine, Message, Session, UsageWindow } from './types'
+import type { BusEvent, Cockpit, Decision, PAState, Machine, Message, Session, UsageWindow } from './types'
 
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } })
@@ -50,6 +50,13 @@ export const api = {
   dirs: (machine: string) => j<string[]>(`/api/machines/${encodeURIComponent(machine)}/dirs`),
   cockpit: (brief = true) => j<Cockpit>(`/api/cockpit?brief=${brief}`),
   cockpitBrief: () => j<Pick<Cockpit, 'briefing' | 'outdated' | 'generating' | 'error'>>('/api/cockpit/brief', { method: 'POST', body: '{}' }),
+  silence: (id: string, title: string, hours: number | null) =>
+    j<{ ok: boolean }>('/api/cockpit/silence', { method: 'POST', body: JSON.stringify({ id, title, hours }) }),
+  unsilence: (id: string) => j<{ ok: boolean }>(`/api/cockpit/silence/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  pa: () => j<PAState>('/api/pa'),
+  paRun: (focus = '') => j<{ ok: boolean; error?: string; already_running?: boolean }>('/api/pa/run', { method: 'POST', body: JSON.stringify({ focus }) }),
+  paItem: (id: string, op: 'send_email' | 'discard' | 'mark', extra: { body?: string | null; status?: string; note?: string } = {}) =>
+    j<{ ok: boolean; error?: string; status?: string }>('/api/pa/item', { method: 'POST', body: JSON.stringify({ id, op, ...extra }) }),
   usage: () => j<UsageWindow[]>('/api/usage'),
   usageHistory: (provider: string, window: string, account: string, hours = 48) =>
     j<{ t: number; pct: number }[]>(`/api/usage/history?${new URLSearchParams({ provider, window, account, hours: String(hours) })}`),

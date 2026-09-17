@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS usage_snapshots (
   fetched_at INTEGER, data TEXT
 );
 CREATE INDEX IF NOT EXISTS usage_pw ON usage_snapshots(provider, window, fetched_at);
+CREATE TABLE IF NOT EXISTS cockpit_silenced (
+  id TEXT PRIMARY KEY, title TEXT, until INTEGER, created_at INTEGER
+);
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   endpoint TEXT PRIMARY KEY, data TEXT, created_at INTEGER, label TEXT
 );
@@ -272,6 +275,29 @@ class Database:
             (account, account, provider, plan, account),
         )
         await self.db.commit()
+
+    # cockpit ----------------------------------------------------------
+    async def silence(self, item_id: str, title: str, until: int) -> None:
+        """until = 0 silences for good."""
+        await self.db.execute(
+            "INSERT OR REPLACE INTO cockpit_silenced(id,title,until,created_at) VALUES(?,?,?,?)",
+            (item_id, title, until, now_ms()),
+        )
+        await self.db.commit()
+
+    async def unsilence(self, item_id: str) -> None:
+        await self.db.execute("DELETE FROM cockpit_silenced WHERE id=?", (item_id,))
+        await self.db.commit()
+
+    async def silenced(self) -> list[dict[str, Any]]:
+        await self.db.execute(
+            "DELETE FROM cockpit_silenced WHERE until > 0 AND until < ?", (now_ms(),)
+        )
+        await self.db.commit()
+        cur = await self.db.execute(
+            "SELECT id, title, until FROM cockpit_silenced ORDER BY created_at DESC"
+        )
+        return [dict(r) for r in await cur.fetchall()]
 
     async def prune_events(self, keep_ms: int) -> None:
         await self.db.execute("DELETE FROM events WHERE ts < ?", (now_ms() - keep_ms,))
