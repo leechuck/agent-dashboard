@@ -19,6 +19,7 @@ from .clientguard import ClientGuard
 from .history_proxy import router as history_router
 from .push import Pusher
 from .state import HubState
+from .terminals import router as terminal_router
 from .ws_nodes import router as ws_router
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
@@ -49,6 +50,7 @@ def create_app() -> FastAPI:
     app.include_router(api_router)
     app.include_router(ws_router)
     app.include_router(history_router)
+    app.include_router(terminal_router)
 
     @app.post("/login")
     async def login(request: Request) -> Response:

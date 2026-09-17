@@ -1,0 +1,6 @@
+{"type":"session","version":3,"id":"p1","timestamp":"2026-09-15T12:20:04.133Z","cwd":"/home/x/togomcp"}
+{"type":"model_change","id":"a","parentId":null,"timestamp":"2026-09-15T12:20:06.630Z","provider":"borg","modelId":"qwen"}
+{"type":"message","id":"b","parentId":"a","timestamp":"2026-09-15T12:20:38.193Z","message":{"role":"user","content":[{"type":"text","text":"Find genes"}]}}
+{"type":"message","id":"c","parentId":"b","timestamp":"2026-09-15T12:20:56.629Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"plan"},{"type":"toolCall","id":"tc1","name":"mcp","arguments":{"server":"togomcp"}}]}}
+{"type":"message","id":"d","parentId":"c","timestamp":"2026-09-15T12:20:56.660Z","message":{"role":"toolResult","toolCallId":"tc1","toolName":"mcp","content":[{"type":"text","text":"32 tools"}]}}
+{"type":"message","id":"e","parentId":"d","timestamp":"2026-09-15T12:23:09.554Z","message":{"role":"assistant","content":[{"type":"text","text":"Here are 690 genes"}]}}

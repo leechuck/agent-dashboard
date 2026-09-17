@@ -1,0 +1,12 @@
+{"timestamp":"2026-09-15T23:52:30.627Z","ordinal":0,"type":"session_meta","payload":{"session_id":"t1","id":"t1","timestamp":"2026-09-15T23:52:27.535Z","cwd":"/home/x/proj","originator":"codex-tui"}}
+{"timestamp":"2026-09-15T23:52:30.627Z","ordinal":1,"type":"event_msg","payload":{"type":"task_started","turn_id":"turn1"}}
+{"timestamp":"2026-09-15T23:52:31.000Z","ordinal":2,"type":"response_item","payload":{"type":"message","id":"m0","role":"developer","content":[{"type":"input_text","text":"<skills_instructions>x"}]}}
+{"timestamp":"2026-09-15T23:52:31.000Z","ordinal":3,"type":"response_item","payload":{"type":"message","id":"m1","role":"user","content":[{"type":"input_text","text":"<environment_context>...</environment_context>"}]}}
+{"timestamp":"2026-09-15T23:52:31.000Z","ordinal":4,"type":"response_item","payload":{"type":"message","id":"m2","role":"user","content":[{"type":"input_text","text":"Please list files"}]}}
+{"timestamp":"2026-09-15T23:52:40.283Z","ordinal":5,"type":"response_item","payload":{"type":"custom_tool_call","id":"c1","status":"completed","call_id":"call_1","name":"shell","input":"ls -la"}}
+{"timestamp":"2026-09-15T23:52:40.525Z","ordinal":6,"type":"response_item","payload":{"type":"custom_tool_call_output","id":"o1","call_id":"call_1","output":[{"type":"input_text","text":"total 0\nfoo"}]}}
+{"timestamp":"2026-09-15T23:52:59.429Z","ordinal":7,"type":"response_item","payload":{"type":"reasoning","id":"r1","summary":[{"type":"summary_text","text":"Listing done"}]}}
+{"timestamp":"2026-09-15T23:53:05.746Z","ordinal":8,"type":"response_item","payload":{"type":"function_call","id":"f1","name":"apply_patch","arguments":"{\"patch\":\"*** Begin\"}","call_id":"call_2"}}
+{"timestamp":"2026-09-15T23:53:05.794Z","ordinal":9,"type":"response_item","payload":{"type":"function_call_output","id":"fo1","call_id":"call_2","output":"ok"}}
+{"timestamp":"2026-09-15T23:53:10.000Z","ordinal":10,"type":"response_item","payload":{"type":"message","id":"m3","role":"assistant","content":[{"type":"output_text","text":"One file: foo"}]}}
+{"timestamp":"2026-09-15T23:57:54.724Z","ordinal":11,"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn1","last_agent_message":"One file: foo"}}

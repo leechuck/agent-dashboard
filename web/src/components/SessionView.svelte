@@ -36,7 +36,10 @@
   )
 
   const canSend = $derived(
-    !!session && session.status !== 'offline' && session.harness === 'claude' && !!(session.extra as any)?.socket,
+    !!session &&
+      session.status !== 'offline' &&
+      ((session.harness === 'claude' && !!(session.extra as any)?.socket) ||
+        (session.harness === 'pi' && !!(session.extra as any)?.inbox)),
   )
 
   async function send(text: string) {

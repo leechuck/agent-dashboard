@@ -10,7 +10,7 @@
   <a href={`#/session/${encodeURIComponent(s.key)}`}>
     <div class="top">
       <span class="name">{s.name || s.session_id.slice(0, 8)}</span>
-      <span class="harness">{s.harness}{s.provider && s.provider !== 'anthropic' && s.provider !== 'openai' ? ` via ${s.provider}` : ''}</span>
+      <span class="harness">{s.harness === 'tmux' ? `${s.provider} (tmux)` : s.harness}{s.harness !== 'tmux' && s.provider && !['anthropic', 'openai', ''].includes(s.provider) ? ` via ${s.provider}` : ''}{(s.extra as any)?.tmux && s.harness !== 'tmux' ? ' · tmux' : ''}</span>
       <span class="age muted">{ago(s.updated_at)}</span>
     </div>
     <div class="mid muted small">{shortCwd(s.cwd)}</div>

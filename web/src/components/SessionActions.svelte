@@ -6,7 +6,7 @@
   let msg = $state('')
   let confirmEnd = $state(false)
 
-  const isBg = $derived(session.kind === 'background')
+  const isBg = $derived(session.kind === 'background' && session.harness === 'claude')
   const live = $derived(['busy', 'idle', 'waiting'].includes(session.status))
 
   async function run(action: string) {
@@ -38,7 +38,10 @@
       <button disabled={!!busy} onclick={() => (confirmEnd = true)}>End session</button>
     {/if}
   {/if}
-  {#if session.session_id}
+  {#if (session.extra as any)?.tmux}
+    <a class="btn" href={`#/terminal/${encodeURIComponent(session.key)}`}>Open terminal</a>
+  {/if}
+  {#if session.session_id && session.harness === 'claude'}
     <a class="btn" href={`#/new?resume=${encodeURIComponent(session.session_id)}&machine=${encodeURIComponent(session.machine)}&cwd=${encodeURIComponent(session.cwd)}`}>Fork to background</a>
   {/if}
   {#if msg}<span class="small muted">{msg}</span>{/if}

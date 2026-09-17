@@ -90,3 +90,65 @@ def install_statusline(settings_path: Path) -> dict[str, Any]:
     settings["statusLine"] = {"type": "command", "command": wrapper}
     settings_path.write_text(json.dumps(settings, indent=2) + "\n")
     return settings
+
+
+# --- Codex ----------------------------------------------------------------
+
+CODEX_MARK = "agentdash.hooks.codex"
+
+
+def codex_hook_command(mode: str) -> str:
+    return f"{sys.executable} -m agentdash.hooks.codex {mode}"
+
+
+def install_codex(hooks_path: Path, permission_timeout: int = 1800) -> dict[str, Any]:
+    """Merge agentdash entries into ~/.codex/hooks.json. Codex still needs /hooks trust."""
+    data: dict[str, Any] = {}
+    if hooks_path.exists():
+        shutil.copy2(hooks_path, hooks_path.with_suffix(".json.bak-agentdash"))
+        data = json.loads(hooks_path.read_text() or "{}")
+    hooks: dict[str, list[dict[str, Any]]] = data.get("hooks") or {}
+
+    def ours(e: dict[str, Any]) -> bool:
+        return any(CODEX_MARK in h.get("command", "") for h in e.get("hooks", []))
+
+    wanted = {
+        "PermissionRequest": [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": codex_hook_command("permission"),
+                        "timeout": permission_timeout,
+                        "statusMessage": "waiting for agentdash",
+                    }
+                ]
+            }
+        ],
+        "SessionStart": [
+            {"hooks": [{"type": "command", "command": codex_hook_command("event"), "timeout": 5}]}
+        ],
+        "Stop": [
+            {"hooks": [{"type": "command", "command": codex_hook_command("event"), "timeout": 5}]}
+        ],
+        "SessionEnd": [
+            {"hooks": [{"type": "command", "command": codex_hook_command("event"), "timeout": 1}]}
+        ],
+    }
+    for ev, entries in wanted.items():
+        hooks[ev] = [e for e in hooks.get(ev, []) if not ours(e)] + entries
+    data["hooks"] = hooks
+    hooks_path.parent.mkdir(parents=True, exist_ok=True)
+    hooks_path.write_text(json.dumps(data, indent=2) + "\n")
+    return data
+
+
+# --- pi -------------------------------------------------------------------
+
+
+def install_pi(extensions_dir: Path) -> Path:
+    src = Path(__file__).resolve().parent.parent.parent / "pi-extension" / "agentdash.ts"
+    extensions_dir.mkdir(parents=True, exist_ok=True)
+    dst = extensions_dir / "agentdash.ts"
+    shutil.copy2(src, dst)
+    return dst

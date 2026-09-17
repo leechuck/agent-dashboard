@@ -34,14 +34,21 @@ from ..models import (
     SessionStatus,
     now_ms,
 )
+from .adapters import codex_rollout, opencode_store, pi_session
 from .adapters.claude_cli import job_action, kill_process, start_background
 from .adapters.claude_socket import SocketSendError, send_user_message
 from .adapters.claude_transcript import TranscriptTail, read_last
+from .adapters.claude_transcript import iter_messages as claude_iter
 from .collectors.claude import ClaudeCollector
+from .collectors.codex import CodexCollector
+from .collectors.opencode import OpencodeCollector
+from .collectors.pi import PiCollector
+from .collectors.tmux import TmuxCollector
 from .collectors.usage import UsageCollector
 from .decisions import DecisionManager
 from .hookserver import serve_hooks
 from .hubclient import HubClient
+from .terminal import TerminalSession
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +60,14 @@ class Node:
         self.s = settings
         self.machine = settings.machine_id
         self.claude = ClaudeCollector(self.machine, settings.claude_config_dirs)
+        self.codex = CodexCollector(self.machine)
+        self.pi = PiCollector(self.machine)
+        self.opencode = OpencodeCollector(self.machine)
+        self.tmux = TmuxCollector(self.machine)
         self.usage = UsageCollector(self.machine, settings.claude_config_dirs, settings.state_dir)
+        self.pi_inbox: dict[str, asyncio.Queue[str]] = {}  # pi session_id -> prompts to deliver
+        self.terminals: dict[str, TerminalSession] = {}
+        self.opencode_seen: dict[str, set[str]] = {}
         self.sessions: dict[str, Session] = {}
         self.tails: dict[str, TranscriptTail] = {}
         self.hub = HubClient(settings.hub_url, settings.node_token, self.on_hub_frame)
@@ -88,6 +102,8 @@ class Node:
             await self.session_action(p)
         elif frame.type == HUB_SESSION_START:
             await self.session_start(p)
+        elif frame.type == "terminal.open":
+            await self.terminal_open(p)
         elif frame.type == HUB_ARM:
             self.armed = bool(p.get("armed"))
             self.armed_until = int(p.get("armed_until") or 0)
@@ -150,9 +166,15 @@ class Node:
             self.decisions.forget_session(key)
         self._refresh.set()
 
-    async def on_claude_permission(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def on_claude_permission(
+        self, payload: dict[str, Any], harness: Harness = Harness.claude
+    ) -> dict[str, Any]:
         self._note_env(payload)
-        key = self._session_key(payload)
+        key = (
+            self._session_key(payload)
+            if harness == Harness.claude
+            else Session.make_key(self.machine, harness, payload.get("session_id", ""))
+        )
         tool = payload.get("tool_name", "")
         sess = self.sessions.get(key)
         if not self.armed_now or not self.hub.connected.is_set():
@@ -163,7 +185,7 @@ class Node:
             id=self.decisions.new_id(),
             machine=self.machine,
             session_key=key,
-            harness=Harness.claude,
+            harness=harness,
             kind="question" if tool in NOT_ANSWERABLE else "permission",
             tool_name=tool,
             tool_input=payload.get("tool_input")
@@ -208,9 +230,26 @@ class Node:
         if not sess or not sess.transcript_path:
             await self.hub.send(NODE_MESSAGES, {"session_key": key, "messages": [], "reset": True})
             return
+        if sess.harness == "opencode":
+            msgs = await asyncio.to_thread(
+                opencode_store.messages,
+                Path(sess.transcript_path),
+                sess.session_id,
+                self.s.tail_lines,
+            )
+            self.opencode_seen[key] = {m.id for m in msgs}
+            await self.hub.send(
+                NODE_MESSAGES,
+                {"session_key": key, "messages": [m.model_dump() for m in msgs], "reset": True},
+            )
+            return
+        parser = {
+            "codex": codex_rollout.iter_messages,
+            "pi": pi_session.iter_messages,
+        }.get(sess.harness, claude_iter)
         path = Path(sess.transcript_path)
-        tail = TranscriptTail(path)
-        initial = await asyncio.to_thread(read_last, path, self.s.tail_lines)
+        tail = TranscriptTail(path, parser)
+        initial = await asyncio.to_thread(read_last, path, self.s.tail_lines, parser)
         tail.offset = path.stat().st_size if path.exists() else 0
         self.tails[key] = tail
         await self.hub.send(
@@ -234,9 +273,91 @@ class Node:
                 result.update(ok=True, reply=reply)
             except SocketSendError as e:
                 result["error"] = str(e)
+        elif sess.harness == "pi" and sess.extra.get("inbox"):
+            self.pi_inbox.setdefault(sess.session_id, asyncio.Queue()).put_nowait(text)
+            result["ok"] = True
         else:
             result["error"] = f"no send channel for {sess.harness}"
         await self.hub.send(NODE_EVENT, {"kind": "prompt.result", **result})
+
+    async def terminal_open(self, p: dict[str, Any]) -> None:
+        term_id = p.get("term_id", "")
+        base = self.s.hub_url.rsplit("/nodes", 1)[0]
+        t = TerminalSession(
+            term_id,
+            p.get("socket", ""),
+            p.get("target", ""),
+            f"{base}/nodes/terminal/{term_id}",
+            self.s.node_token,
+        )
+        self.terminals[term_id] = t
+
+        async def run() -> None:
+            try:
+                await t.run(int(p.get("rows", 30)), int(p.get("cols", 100)))
+            finally:
+                self.terminals.pop(term_id, None)
+
+        asyncio.create_task(run())
+
+    # pi extension -----------------------------------------------------
+    def pi_report(self, payload: dict[str, Any]) -> None:
+        sid = payload.get("session_id", "")
+        if not sid:
+            return
+        info = self.pi.live.setdefault(sid, {})
+        info.update({k: v for k, v in payload.items() if k != "session_id"})
+        info["seen"] = now_ms()
+        if payload.get("event") == "session_shutdown":
+            self.pi.live.pop(sid, None)
+        self._refresh.set()
+
+    async def pi_next_prompt(self, sid: str, timeout: float) -> str | None:
+        q = self.pi_inbox.setdefault(sid, asyncio.Queue())
+        try:
+            return await asyncio.wait_for(q.get(), timeout)
+        except TimeoutError:
+            return None
+
+    async def on_pi_toolcall(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Gate a pi tool call while armed; mirrors the Claude permission flow."""
+        key = Session.make_key(self.machine, Harness.pi, payload.get("session_id", ""))
+        tool = payload.get("tool_name", "")
+        if not self.armed_now or not self.hub.connected.is_set():
+            return {}
+        if self.decisions.is_remembered(key, tool):
+            return {"behavior": "allow"}
+        sess = self.sessions.get(key)
+        d = Decision(
+            id=self.decisions.new_id(),
+            machine=self.machine,
+            session_key=key,
+            harness=Harness.pi,
+            kind="permission",
+            tool_name=tool,
+            tool_input=payload.get("tool_input")
+            if isinstance(payload.get("tool_input"), dict)
+            else None,
+            cwd=payload.get("cwd", ""),
+            session_name=sess.name if sess else "",
+            expires_at=now_ms() + int(self.s.decision_timeout * 1000),
+        )
+        pend = self.decisions.add(d)
+        self.status_hint[key] = (SessionStatus.waiting, f"permission: {tool}", now_ms())
+        self._refresh.set()
+        await self.hub.send(NODE_DECISION_CREATED, d.model_dump())
+        try:
+            result = await asyncio.wait_for(pend.future, self.s.decision_timeout)
+        except TimeoutError:
+            d.status = DecisionStatus.expired
+            d.answered_at = now_ms()
+            result = {}
+        finally:
+            self.decisions.finish(d.id)
+            self.status_hint.pop(key, None)
+            self._refresh.set()
+            await self.hub.send(NODE_DECISION_RESOLVED, d.model_dump())
+        return {"behavior": result.get("behavior", ""), "reason": result.get("reason", "")}
 
     async def session_action(self, p: dict[str, Any]) -> None:
         key, action, rid = p.get("session_key", ""), p.get("action", ""), p.get("request_id", "")
@@ -300,6 +421,15 @@ class Node:
         while True:
             try:
                 sessions = await self.claude.collect()
+                for coll in (self.codex, self.pi, self.opencode):
+                    try:
+                        sessions += await asyncio.to_thread(coll.collect)
+                    except Exception:  # noqa: BLE001
+                        log.exception("%s collector failed", type(coll).__name__)
+                try:
+                    sessions = await asyncio.to_thread(self.tmux.annotate, sessions)
+                except Exception:  # noqa: BLE001
+                    log.exception("tmux collector failed")
                 self._apply_hints(sessions)
                 self.sessions = {s.key: s for s in sessions}
                 await self.hub.send(NODE_SESSIONS, {"sessions": [s.model_dump() for s in sessions]})
@@ -312,7 +442,24 @@ class Node:
             self._refresh.clear()
 
     async def tail_loop(self) -> None:
+        tick = 0
         while True:
+            tick += 1
+            if tick % 5 == 0:
+                for key, seen in list(self.opencode_seen.items()):
+                    sess = self.sessions.get(key)
+                    if not sess:
+                        continue
+                    msgs = await asyncio.to_thread(
+                        opencode_store.messages, Path(sess.transcript_path), sess.session_id, 400
+                    )
+                    new = [m for m in msgs if m.id not in seen]
+                    if new:
+                        seen.update(m.id for m in new)
+                        await self.hub.send(
+                            NODE_MESSAGES,
+                            {"session_key": key, "messages": [m.model_dump() for m in new]},
+                        )
             for key, tail in list(self.tails.items()):
                 try:
                     new = await asyncio.to_thread(tail.read_new)
@@ -357,7 +504,7 @@ class Node:
                 "id": self.machine,
                 "hostname": platform.node(),
                 "os": f"{platform.system()} {platform.release()}",
-                "harnesses": ["claude"],
+                "harnesses": ["claude", "codex", "pi", "opencode", "tmux"],
                 "node_version": __version__,
             }
         }

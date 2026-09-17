@@ -89,6 +89,31 @@ def install_hooks(
             typer.echo(f"installed agentdash hooks into {path}")
 
 
+@install_app.command("codex")
+def install_codex_cmd(
+    permission_timeout: int = typer.Option(1800, help="seconds a phone decision may take"),
+) -> None:
+    """Write agentdash hooks into ~/.codex/hooks.json (then trust them with /hooks in Codex)."""
+    from pathlib import Path
+
+    from .install.hooks import install_codex
+
+    path = Path.home() / ".codex" / "hooks.json"
+    install_codex(path, permission_timeout)
+    typer.echo(f"installed agentdash hooks into {path}; run /hooks inside Codex to trust them")
+
+
+@install_app.command("pi")
+def install_pi_cmd() -> None:
+    """Install the agentdash pi extension into ~/.pi/agent/extensions."""
+    from pathlib import Path
+
+    from .install.hooks import install_pi
+
+    dst = install_pi(Path.home() / ".pi" / "agent" / "extensions")
+    typer.echo(f"installed {dst}")
+
+
 @install_app.command("statusline")
 def install_statusline_cmd(
     config_dir: list[str] = typer.Option(None, help="Claude config dir(s)"),

@@ -152,10 +152,11 @@ def iter_messages(lines: Iterator[str]) -> Iterator[Message]:
 class TranscriptTail:
     """Incremental reader: remembers the byte offset and yields new messages."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, parser=None) -> None:
         self.path = path
         self.offset = 0
         self._buf = b""
+        self._parser = parser or iter_messages
 
     def read_new(self) -> list[Message]:
         try:
@@ -174,14 +175,15 @@ class TranscriptTail:
         data = self._buf + chunk
         lines = data.split(b"\n")
         self._buf = lines.pop()  # incomplete last line
-        return list(iter_messages(line.decode("utf-8", "replace") for line in lines))
+        return list(self._parser(line.decode("utf-8", "replace") for line in lines))
 
 
-def read_last(path: Path, n: int) -> list[Message]:
+def read_last(path: Path, n: int, parser=None) -> list[Message]:
     """Parse the whole file and keep the last n messages (initial load)."""
+    parser = parser or iter_messages
     try:
         with path.open("r", encoding="utf-8", errors="replace") as f:
-            msgs = list(iter_messages(iter(f)))
+            msgs = list(parser(iter(f)))
     except FileNotFoundError:
         return []
     return msgs[-n:]

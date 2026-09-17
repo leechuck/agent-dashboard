@@ -10,6 +10,7 @@
   import History from './components/History.svelte'
   import NewSession from './components/NewSession.svelte'
   import Limits from './components/Limits.svelte'
+  import TerminalView from './components/Terminal.svelte'
 
   let route = $state(parse(location.hash))
 
@@ -22,6 +23,7 @@
     if (h.startsWith('decisions')) return { page: 'decisions' }
     if (h.startsWith('history/')) return { page: 'history', key: decodeURIComponent(h.slice(8)) }
     if (h === 'history') return { page: 'history' }
+    if (h.startsWith('terminal/')) return { page: 'terminal', key: decodeURIComponent(h.slice(9)) }
     if (h.startsWith('session/')) return { page: 'session', key: decodeURIComponent(h.slice(8)) }
     return { page: 'fleet' }
   }
@@ -61,6 +63,8 @@
           <History id={route.key} />
         {:else if route.page === 'limits'}
           <Limits />
+        {:else if route.page === 'terminal' && route.key}
+          <TerminalView key={route.key} />
         {:else if route.page === 'new'}
           <NewSession machine={route.q?.get('machine') ?? ''} resume={route.q?.get('resume') ?? ''} title={route.q?.get('cwd') ?? ''} />
         {:else if route.key}
@@ -77,6 +81,8 @@
       <History id={route.key} />
     {:else if route.page === 'limits'}
       <Limits />
+    {:else if route.page === 'terminal' && route.key}
+      <TerminalView key={route.key} />
     {:else if route.page === 'new'}
       <NewSession machine={route.q?.get('machine') ?? ''} resume={route.q?.get('resume') ?? ''} title={route.q?.get('cwd') ?? ''} />
     {:else if route.page === 'session' && route.key}
