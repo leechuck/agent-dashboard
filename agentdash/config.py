@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     push_subject: str = "mailto:agentdash@example.com"  # VAPID contact, set yours in .env
     keep_usage_days: int = 30
     keep_events_days: int = 90
+    cockpit_min_interval: float = 600.0  # seconds between automatic model briefings
 
     # node
     hub_url: str = "ws://127.0.0.1:8790/nodes"
@@ -51,6 +52,10 @@ class Settings(BaseSettings):
     decision_timeout: float = 1770.0  # seconds; keep below the hook timeout (1800)
     arm_hours: float = 12.0
     usage_interval: float = 600.0  # seconds between usage polls (plus jitter)
+    # cockpit briefing: any OpenAI-compatible endpoint; the key stays on this node
+    cockpit_base_url: str = "https://openrouter.ai/api/v1"
+    cockpit_model: str = "anthropic/claude-sonnet-5"
+    cockpit_api_key: str = ""  # empty = use OPENROUTER_API_KEY
 
     @property
     def state_dir(self) -> Path:

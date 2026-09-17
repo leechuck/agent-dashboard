@@ -115,8 +115,16 @@ def iter_messages(lines: Iterator[str]) -> Iterator[Message]:
 
 
 def scan_status(lines: Iterator[str]) -> dict[str, Any]:
-    """Return {cwd, busy, last_agent_message, last_ts} from a rollout tail."""
-    info: dict[str, Any] = {"cwd": "", "busy": False, "last_agent_message": "", "last_ts": None}
+    """Return {cwd, busy, last_agent_message, last_user, context_*, last_ts} from a rollout tail."""
+    info: dict[str, Any] = {
+        "cwd": "",
+        "busy": False,
+        "last_agent_message": "",
+        "last_user": "",
+        "context_tokens": 0,
+        "context_window": 0,
+        "last_ts": None,
+    }
     for line in lines:
         try:
             rec = json.loads(line)
@@ -135,6 +143,12 @@ def scan_status(lines: Iterator[str]) -> dict[str, Any]:
                 info["busy"] = False
                 if p.get("last_agent_message"):
                     info["last_agent_message"] = str(p["last_agent_message"])
+            elif et == "user_message" and p.get("message"):
+                info["last_user"] = " ".join(str(p["message"]).split())[:300]
+            elif et == "token_count" and isinstance(p.get("info"), dict):
+                last = p["info"].get("last_token_usage") or {}
+                info["context_tokens"] = int(last.get("total_tokens") or 0)
+                info["context_window"] = int(p["info"].get("model_context_window") or 0)
         elif t == "turn_context" and p.get("cwd"):
             info["cwd"] = p["cwd"]
         ts = _ts(rec)

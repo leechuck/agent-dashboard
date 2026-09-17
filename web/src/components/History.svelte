@@ -158,7 +158,7 @@
   .agent { font-weight: 600; }
   .when { margin-left: auto; }
   .first { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .dhead { position: sticky; top: 48px; background: var(--surface); border-bottom: 1px solid var(--hairline); padding: 10px 16px; display: grid; gap: 4px; }
+  .dhead { position: sticky; top: var(--sticky-top, 48px); background: var(--surface); border-bottom: 1px solid var(--hairline); padding: 10px 16px; display: grid; gap: 4px; }
   .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .btn { justify-self: start; font-size: 13px; padding: 4px 10px; border: 1px solid var(--cobalt); border-radius: var(--radius); }
   .resume { padding: 6px 10px; background: var(--page); border-radius: var(--radius); user-select: all; }

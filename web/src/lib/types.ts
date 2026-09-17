@@ -87,3 +87,51 @@ export interface UsageWindow {
   fetched_at: number
   detail: Record<string, any>
 }
+
+export interface CockpitAction {
+  type: 'open_session' | 'open_decisions' | 'open_limits' | 'new_session' | 'cleanup'
+  label: string
+  href: string
+  machine: string
+  keys: string[]
+}
+
+export interface Finding {
+  id: string
+  severity: 'act' | 'warn' | 'info'
+  kind: string
+  title: string
+  detail: string
+  session_key: string
+  machine: string
+  action: CockpitAction | null
+}
+
+export interface Suggestion {
+  title: string
+  why: string
+  kind: string
+  session_key: string
+  prompt: string
+}
+
+export interface Briefing {
+  summary: string
+  sessions: Record<string, string>
+  suggestions: Suggestion[]
+  generated_at: number
+  model: string
+  via: string
+  cost_usd: number | null
+}
+
+export interface Cockpit {
+  headline: string
+  stats: { busy: number; waiting: number; idle: number; stale: number; machines_online: number; machines: number }
+  findings: Finding[]
+  headroom: Record<string, number>
+  briefing: Briefing | null
+  outdated: boolean
+  generating: boolean
+  error: string
+}

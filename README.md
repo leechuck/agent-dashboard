@@ -6,6 +6,14 @@ office workstation and leechuck.de. Phone first.
 
 What it does:
 
+- **Cockpit**: one screen that says where you are needed. Deterministic rules
+  rank approvals, blocked sessions, limits about to run out (with burn rate and
+  which harness still has room), context windows filling up, silent busy
+  sessions, agents sharing a directory, and stale sessions. On top of that a
+  model writes a short briefing: what each agent is doing and what to do next
+  (answer, compact, hand off to a fresh session, fan out, switch harness),
+  with prompts you can drop into a session's composer. It only recommends;
+  nothing is sent without you (ADR 0004).
 - **Fleet**: live roster per machine, status (busy, idle, waiting for you),
   last line, one-tap access to the transcript.
 - **Decisions**: permission prompts from Claude (and Codex, pi) answered from

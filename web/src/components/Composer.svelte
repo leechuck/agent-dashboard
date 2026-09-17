@@ -5,14 +5,19 @@
     error,
     hint,
     onsend,
+    draft = '',
   }: {
     disabled: boolean
     sendState: 'idle' | 'sending' | 'sent' | 'failed'
     error: string
     hint: string
     onsend: (text: string) => void
+    draft?: string
   } = $props()
   let text = $state('')
+  $effect(() => {
+    if (draft) text = draft
+  })
   function submit(e: Event) {
     e.preventDefault()
     if (!text.trim() || disabled) return

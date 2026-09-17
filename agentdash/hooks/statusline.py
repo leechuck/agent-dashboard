@@ -1,4 +1,4 @@
-"""Statusline sidecar: record Claude's rate_limits, then run the original status line.
+"""Statusline sidecar: record Claude's rate_limits and context window, then run the original.
 
 Installed as `statusLine.command` in ~/.claude/settings.json by
 `agentdash install statusline`; the original command is kept as the argument.
@@ -31,6 +31,25 @@ def main(argv: list[str]) -> int:
             state.mkdir(parents=True, exist_ok=True)
             tmp = out.with_suffix(".tmp")
             tmp.write_text(json.dumps({"rate_limits": rl, "_written": int(time.time() * 1000)}))
+            os.replace(tmp, out)
+        except OSError:
+            pass
+    cw, sid = data.get("context_window"), str(data.get("session_id") or "")
+    if isinstance(cw, dict) and sid and "/" not in sid:
+        state = Path(os.environ.get("AGENTDASH_STATE_DIR", Path.home() / ".agentdash"))
+        out = state / "claude-context" / f"{sid}.json"
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            tmp = out.with_suffix(".tmp")
+            tmp.write_text(
+                json.dumps(
+                    {
+                        "context_window_size": cw.get("context_window_size"),
+                        "used_percentage": cw.get("used_percentage"),
+                        "_written": int(time.time() * 1000),
+                    }
+                )
+            )
             os.replace(tmp, out)
         except OSError:
             pass

@@ -11,6 +11,7 @@
   import NewSession from './components/NewSession.svelte'
   import Limits from './components/Limits.svelte'
   import TerminalView from './components/Terminal.svelte'
+  import Cockpit from './components/Cockpit.svelte'
 
   let route = $state(parse(location.hash))
 
@@ -20,6 +21,7 @@
     if (h === 'login') return { page: 'login' }
     if (h === 'settings') return { page: 'settings' }
     if (h === 'limits') return { page: 'limits' }
+    if (h === 'cockpit') return { page: 'cockpit' }
     if (h.startsWith('decisions')) return { page: 'decisions' }
     if (h.startsWith('history/')) return { page: 'history', key: decodeURIComponent(h.slice(8)) }
     if (h === 'history') return { page: 'history' }
@@ -70,7 +72,7 @@
         {:else if route.key}
           <SessionView key={route.key} />
         {:else}
-          <div class="placeholder muted">Pick a session to read along.</div>
+          <Cockpit />
         {/if}
       </section>
     {:else if route.page === 'decisions'}
@@ -87,8 +89,10 @@
       <NewSession machine={route.q?.get('machine') ?? ''} resume={route.q?.get('resume') ?? ''} title={route.q?.get('cwd') ?? ''} />
     {:else if route.page === 'session' && route.key}
       <SessionView key={route.key} />
+    {:else if route.page === 'cockpit'}
+      <Cockpit />
     {:else}
-      <Fleet selected={undefined} />
+      <Fleet selected={undefined} cockpitCard />
     {/if}
   </main>
 {/if}
@@ -102,7 +106,7 @@
     grid-template-columns: 380px 1fr;
     height: calc(100vh - 48px);
   }
-  main.wide aside { border-right: 1px solid var(--hairline); overflow-y: auto; }
-  main.wide section { overflow-y: auto; min-width: 0; }
-  .placeholder { padding: 48px 24px; }
+  /* the sidebar scrolls on its own, so sticky headers inside it pin to its top, not below the top bar */
+  main.wide aside { border-right: 1px solid var(--hairline); overflow-y: auto; --sticky-top: 0px; }
+  main.wide section { overflow-y: auto; min-width: 0; --sticky-top: 0px; }
 </style>

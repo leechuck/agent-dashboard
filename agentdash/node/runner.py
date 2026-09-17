@@ -34,6 +34,7 @@ from ..models import (
     SessionStatus,
     now_ms,
 )
+from . import briefing
 from .adapters import codex_rollout, hermes_state, opencode_store, pi_session
 from .adapters.claude_cli import job_action, kill_process, start_background
 from .adapters.claude_socket import SocketSendError, send_user_message
@@ -58,9 +59,10 @@ NOT_ANSWERABLE = {"AskUserQuestion"}
 
 class Node:
     def __init__(self, settings: Settings) -> None:
+        self._tasks: set[asyncio.Task[Any]] = set()
         self.s = settings
         self.machine = settings.machine_id
-        self.claude = ClaudeCollector(self.machine, settings.claude_config_dirs)
+        self.claude = ClaudeCollector(self.machine, settings.claude_config_dirs, settings.state_dir)
         self.codex = CodexCollector(self.machine)
         self.pi = PiCollector(self.machine)
         self.opencode = OpencodeCollector(self.machine)
@@ -109,6 +111,8 @@ class Node:
             await self.session_start(p)
         elif frame.type == "terminal.open":
             await self.terminal_open(p)
+        elif frame.type == "cockpit.brief":
+            self._spawn(self.cockpit_brief(p))
         elif frame.type == HUB_ARM:
             self.armed = bool(p.get("armed"))
             self.armed_until = int(p.get("armed_until") or 0)
@@ -403,6 +407,18 @@ class Node:
             result["error"] = f"unknown action {action}"
         self._refresh.set()
         await self.hub.send(NODE_EVENT, {"kind": "action.result", "action": action, **result})
+
+    def _spawn(self, coro: Any) -> None:
+        """Run slow work off the frame loop; keep a reference so it is not collected."""
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def cockpit_brief(self, p: dict[str, Any]) -> None:
+        result = await briefing.brief(self.s, p.get("system", ""), p.get("digest") or {})
+        await self.hub.send(
+            NODE_EVENT, {"kind": "brief.result", "request_id": p.get("request_id", ""), **result}
+        )
 
     async def session_start(self, p: dict[str, Any]) -> None:
         rid = p.get("request_id", "")

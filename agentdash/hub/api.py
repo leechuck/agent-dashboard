@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from ..models import now_ms as _now
+from . import cockpit as ck
 from .auth import require_web_token
 from .state import HubState
 
@@ -184,8 +186,6 @@ class CleanupBody(BaseModel):
 @router.post("/machines/{machine_id}/cleanup")
 async def cleanup(machine_id: str, body: CleanupBody, request: Request):
     """Remove stale finished/blocked background sessions (Claude `rm`); others are only hidden."""
-    from ..models import now_ms as _now
-
     st = _state(request)
     cutoff = _now() - body.older_than_hours * 3600 * 1000
     targets = []
@@ -216,6 +216,57 @@ async def machine_dirs(machine_id: str, request: Request):
     return [d for d, _ in sorted(seen.items(), key=lambda kv: -kv[1])][:40]
 
 
+async def _cockpit_inputs(st: HubState):
+    sessions = await st.db.list_sessions(limit=1000)
+    machines = await st.db.list_machines()
+    decisions = await st.db.list_decisions(pending_only=True)
+    usage = await st.db.latest_usage()
+    since = _now() - 3 * 3600 * 1000
+    history = {
+        f"{w.provider}:{w.window}": await st.db.usage_history(w.provider, w.window, since)
+        for w in usage
+        if w.provider != "openrouter"
+    }
+    findings = ck.analyse(sessions, machines, decisions, usage, history)
+    return sessions, machines, usage, findings
+
+
+@router.get("/cockpit")
+async def cockpit(request: Request, brief: bool = True):
+    """Findings from the rules, plus the cached model briefing.
+
+    With brief=true a stale briefing is refreshed in the background (rate limited),
+    so opening the page is what spends model tokens, not the hub idling.
+    """
+    st = _state(request)
+    sessions, machines, usage, findings = await _cockpit_inputs(st)
+    stats = ck.stats(sessions, machines)
+    d = ck.digest(sessions, machines, usage, findings)
+    st.briefer.min_interval = request.app.state.settings.cockpit_min_interval
+    if brief and st.nodes:
+        task = asyncio.create_task(st.briefer.refresh(st, d))
+        request.app.state.bg_tasks = getattr(request.app.state, "bg_tasks", set())
+        request.app.state.bg_tasks.add(task)
+        task.add_done_callback(request.app.state.bg_tasks.discard)
+    return {
+        "headline": ck.headline(findings, stats),
+        "stats": stats,
+        "findings": ck.to_json(findings),
+        "headroom": ck.provider_headroom(usage),
+        **st.briefer.view(ck.fingerprint(d)),
+    }
+
+
+@router.post("/cockpit/brief")
+async def cockpit_brief(request: Request):
+    """Generate a fresh briefing now and return the result."""
+    st = _state(request)
+    sessions, machines, usage, findings = await _cockpit_inputs(st)
+    d = ck.digest(sessions, machines, usage, findings)
+    await st.briefer.refresh(st, d, force=True)
+    return st.briefer.view(ck.fingerprint(d))
+
+
 @router.get("/usage")
 async def usage(request: Request):
     return [w.model_dump() for w in await _state(request).db.latest_usage()]
@@ -223,8 +274,6 @@ async def usage(request: Request):
 
 @router.get("/usage/history")
 async def usage_history(request: Request, provider: str, window: str, hours: int = 48):
-    from ..models import now_ms as _now
-
     pts = await _state(request).db.usage_history(provider, window, _now() - hours * 3600 * 1000)
     return [{"t": t, "pct": p} for t, p in pts]
 

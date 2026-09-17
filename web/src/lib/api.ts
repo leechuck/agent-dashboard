@@ -1,4 +1,4 @@
-import type { BusEvent, Decision, Machine, Message, Session, UsageWindow } from './types'
+import type { BusEvent, Cockpit, Decision, Machine, Message, Session, UsageWindow } from './types'
 
 async function j<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } })
@@ -48,6 +48,8 @@ export const api = {
       body: JSON.stringify({ older_than_hours: 48, keys }),
     }),
   dirs: (machine: string) => j<string[]>(`/api/machines/${encodeURIComponent(machine)}/dirs`),
+  cockpit: (brief = true) => j<Cockpit>(`/api/cockpit?brief=${brief}`),
+  cockpitBrief: () => j<Pick<Cockpit, 'briefing' | 'outdated' | 'generating' | 'error'>>('/api/cockpit/brief', { method: 'POST', body: '{}' }),
   usage: () => j<UsageWindow[]>('/api/usage'),
   usageHistory: (provider: string, window: string, hours = 48) =>
     j<{ t: number; pct: number }[]>(`/api/usage/history?${new URLSearchParams({ provider, window, hours: String(hours) })}`),

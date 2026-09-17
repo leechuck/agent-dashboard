@@ -1,5 +1,5 @@
 import { api, subscribe } from './api'
-import type { BusEvent, Decision, Machine, Message, Session, UsageWindow } from './types'
+import type { BusEvent, Cockpit, Decision, Machine, Message, Session, UsageWindow } from './types'
 
 export class Fleet {
   machines = $state<Record<string, Machine>>({})
@@ -7,6 +7,9 @@ export class Fleet {
   messages = $state<Record<string, Message[]>>({})
   decisions = $state<Record<string, Decision>>({})
   usage = $state<UsageWindow[]>([])
+  cockpit = $state<Cockpit | null>(null)
+  /** Prompt drafts handed from the cockpit to a session's composer, by session key. */
+  drafts = $state<Record<string, string>>({})
   connected = $state(false)
   loaded = $state(false)
   error = $state('')
@@ -24,6 +27,7 @@ export class Fleet {
     } catch (e) {
       this.error = String(e)
     }
+    void this.loadCockpit(false)
     this.stop?.()
     this.stop = subscribe((e) => this.apply(e), (open) => (this.connected = open))
   }
@@ -44,10 +48,31 @@ export class Fleet {
       const incoming = e.data as UsageWindow[]
       const keep = this.usage.filter((u) => !incoming.some((n) => n.provider === u.provider && n.window === u.window))
       this.usage = [...keep, ...incoming].sort((a, b) => a.provider.localeCompare(b.provider) || a.window.localeCompare(b.window))
+    } else if (e.kind === 'cockpit.updated') {
+      void this.loadCockpit(false)
     } else if (e.kind === 'session.messages') {
       const { session_key, messages, reset } = e.data as { session_key: string; messages: Message[]; reset: boolean }
       const cur = reset ? [] : (this.messages[session_key] ?? [])
       this.messages[session_key] = [...cur, ...messages].slice(-2000)
+    }
+  }
+
+  /** brief=true lets the hub refresh an outdated model briefing; false only reads. */
+  async loadCockpit(brief = true) {
+    try {
+      this.cockpit = await api.cockpit(brief)
+    } catch {
+      /* the page shows the last good state */
+    }
+  }
+
+  async refreshBriefing() {
+    if (this.cockpit) this.cockpit.generating = true
+    try {
+      const r = await api.cockpitBrief()
+      if (this.cockpit) Object.assign(this.cockpit, r)
+    } finally {
+      await this.loadCockpit(false)
     }
   }
 
@@ -62,6 +87,13 @@ export class Fleet {
       await new Promise((r) => setTimeout(r, 2500))
     }
     this.messages[key] ??= []
+  }
+
+  /** Whether the dashboard itself can deliver a prompt (Claude inbox socket, pi extension). */
+  static canSend(s: Session | undefined): boolean {
+    if (!s || s.status === 'offline') return false
+    const x = s.extra as Record<string, unknown> | undefined
+    return (s.harness === 'claude' && !!x?.socket) || (s.harness === 'pi' && !!x?.inbox)
   }
 
   /** Not busy and untouched for two days: hidden by default, removable in bulk. */

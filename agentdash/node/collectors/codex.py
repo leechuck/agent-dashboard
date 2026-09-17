@@ -112,6 +112,15 @@ class CodexCollector:
                 or (t.get("first_user_message") or "")[:60]
                 or Path(t.get("cwd") or info.get("cwd", "") or "codex").name
             )
+            extra: dict = {"codex_home": str(self.home)}
+            if info.get("last_user"):
+                extra["last_user"] = info["last_user"]
+            if info.get("context_tokens") and info.get("context_window"):
+                extra["context_tokens"] = info["context_tokens"]
+                extra["context_window"] = info["context_window"]
+                extra["context_pct"] = round(
+                    100 * info["context_tokens"] / info["context_window"], 1
+                )
             return Session(
                 key=Session.make_key(self.machine, Harness.codex, t["id"]),
                 machine=self.machine,
@@ -129,7 +138,7 @@ class CodexCollector:
                 transcript_path=str(path) if path else "",
                 last_line=" ".join(str(info.get("last_agent_message", "")).split())[:160],
                 model=str(t.get("model") or ""),
-                extra={"codex_home": str(self.home)},
+                extra=extra,
             )
 
         for pid, r in running.items():

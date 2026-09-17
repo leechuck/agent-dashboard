@@ -5,7 +5,10 @@
   import AttentionStrip from './AttentionStrip.svelte'
   import type { Session } from '../lib/types'
 
-  let { selected }: { selected: string | undefined } = $props()
+  let { selected, cockpitCard = false }: { selected: string | undefined; cockpitCard?: boolean } = $props()
+  const ck = $derived(fleet.cockpit)
+  const ckActs = $derived(ck?.findings.filter((f) => f.severity === 'act').length ?? 0)
+  const ckWarns = $derived(ck?.findings.filter((f) => f.severity === 'warn').length ?? 0)
   let showFinished = $state(false)
   let showStale = $state<Record<string, boolean>>({})
 
@@ -47,6 +50,13 @@
   }
 </script>
 
+{#if cockpitCard && ck}
+  <a class="ck" class:hot={ckActs > 0} class:calm={ckActs === 0 && ckWarns === 0} href="#/cockpit">
+    <span class="ckh">{ck.headline.split('. ')[0]}</span>
+    <span class="cks small muted">{ck.stats.busy} working · {ck.stats.idle} idle{ck.briefing ? ' · briefing ready' : ''}</span>
+    <span class="ckgo">Cockpit ›</span>
+  </a>
+{/if}
 <AttentionStrip />
 
 {#if fleet.error}
@@ -86,6 +96,13 @@
 
 <style>
   ul { list-style: none; margin: 0; padding: 0; background: var(--surface); }
+  .ck { display: grid; grid-template-columns: 1fr auto; gap: 0 12px; align-items: center; padding: 10px 16px 10px 12px; background: var(--surface); border-bottom: 1px solid var(--hairline); border-left: 4px solid var(--amber); color: inherit; text-decoration: none; }
+  .ck:hover { text-decoration: none; background: var(--page); }
+  .ck.hot { border-left-color: var(--signal); }
+  .ck.calm { border-left-color: var(--moss); }
+  .ckh { font-weight: 600; }
+  .cks { grid-column: 1; }
+  .ckgo { grid-column: 2; grid-row: 1 / span 2; color: var(--cobalt); font-size: 13px; white-space: nowrap; }
   .notice { padding: 16px; margin: 0; }
   .empty { padding: 10px 16px 14px; margin: 0; font-size: 13px; }
   .foot { padding: 16px; }

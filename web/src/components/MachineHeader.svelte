@@ -36,7 +36,7 @@
 <style>
   .mh {
     position: sticky;
-    top: 48px;
+    top: var(--sticky-top, 48px);
     z-index: 4;
     display: flex;
     align-items: center;

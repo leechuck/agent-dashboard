@@ -3,12 +3,14 @@
   const pending = $derived(fleet.pendingDecisions.length)
   const waiting = $derived(fleet.waiting.length)
   const worst = $derived(fleet.worstUsage)
+  const needs = $derived(fleet.cockpit?.findings.filter((f) => f.severity === 'act').length ?? 0)
 </script>
 
 <header>
   <a class="brand" href="#/">agentdash</a>
   <span class="link" class:live={fleet.connected} title={fleet.connected ? 'live updates on' : 'reconnecting'}></span>
   <nav>
+    <a href="#/cockpit" class:hot={needs > 0}>Cockpit{needs > 0 ? ` ${needs}` : ''}</a>
     <a href="#/decisions" class:hot={pending > 0}>Decisions{pending > 0 ? ` ${pending}` : ''}</a>
     <a href="#/limits" class:warn={!!worst && worst.used_pct >= 80} title={worst ? `${worst.provider} ${worst.label}` : ''}>Limits{worst ? ` ${worst.used_pct.toFixed(0)}%` : ''}</a>
     <a href="#/history">History</a>

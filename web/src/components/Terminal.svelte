@@ -68,7 +68,7 @@
 <p class="small muted hint">Attached to tmux {(session?.extra as any)?.tmux?.target} on {session?.machine}. Keystrokes only go through while "Controlling" is on. Ctrl+B D detaches.</p>
 
 <style>
-  .thead { display: flex; gap: 12px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--hairline); background: var(--surface); position: sticky; top: 48px; z-index: 3; }
+  .thead { display: flex; gap: 12px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--hairline); background: var(--surface); position: sticky; top: var(--sticky-top, 48px); z-index: 3; }
   .name { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .term { height: calc(100vh - 48px - 46px - 40px); background: #141a21; padding: 4px; }
   .hint { padding: 6px 16px; margin: 0; }

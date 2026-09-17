@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { fleet } from '../lib/store.svelte'
+  import { Fleet, fleet } from '../lib/store.svelte'
   import { api } from '../lib/api'
   import { shortCwd, statusLabel } from '../lib/format'
   import MessageItem from './MessageItem.svelte'
@@ -35,14 +35,10 @@
     messages.filter((m) => (showThinking || m.kind !== 'thinking') && (showMeta || !m.is_meta)),
   )
 
-  const canSend = $derived(
-    !!session &&
-      session.status !== 'offline' &&
-      ((session.harness === 'claude' && !!(session.extra as any)?.socket) ||
-        (session.harness === 'pi' && !!(session.extra as any)?.inbox)),
-  )
+  const canSend = $derived(Fleet.canSend(session))
 
   async function send(text: string) {
+    delete fleet.drafts[key]
     sendState = 'sending'
     sendError = ''
     try {
@@ -88,14 +84,14 @@
     {/each}
   </div>
 
-  <Composer disabled={!canSend} sendState={sendState} error={sendError} onsend={send}
+  <Composer disabled={!canSend} sendState={sendState} error={sendError} onsend={send} draft={fleet.drafts[key] ?? ''}
     hint={canSend ? '' : 'This session cannot receive prompts from here.'} />
 {/if}
 
 <style>
   .head {
     position: sticky;
-    top: 48px;
+    top: var(--sticky-top, 48px);
     z-index: 3;
     background: var(--surface);
     border-bottom: 1px solid var(--hairline);

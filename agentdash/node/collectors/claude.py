@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from ...models import Harness, Session, SessionStatus, now_ms
-from ..adapters.claude_transcript import last_line_preview
+from ..adapters.claude_transcript import tail_facts
 
 log = logging.getLogger(__name__)
 
@@ -51,9 +51,38 @@ def find_transcript(config_dir: Path, session_id: str, cwd: str) -> Path | None:
     return None
 
 
+def _describe(extra: dict[str, Any], facts: dict[str, Any], sid: str, state_dir: Path) -> None:
+    """Add what the cockpit needs: last user request and how full the context is.
+
+    The statusline sidecar knows the real window size; without it, assume 200k and
+    switch to 1M once the prompt is already larger than that.
+    """
+    if facts.get("last_user"):
+        extra["last_user"] = facts["last_user"]
+    tokens = int(facts.get("context_tokens") or 0)
+    window, pct = 0, None
+    try:
+        side = json.loads((state_dir / "claude-context" / f"{sid}.json").read_text())
+        window = int(side.get("context_window_size") or 0)
+        if side.get("used_percentage") is not None and not tokens:
+            pct = float(side["used_percentage"])
+    except (OSError, ValueError, json.JSONDecodeError):
+        pass
+    if not tokens and pct is None:
+        return
+    if not window:
+        window = 1_000_000 if tokens > 200_000 else 200_000
+    extra["context_tokens"] = tokens
+    extra["context_window"] = window
+    extra["context_pct"] = round(pct if pct is not None else 100 * tokens / window, 1)
+
+
 class ClaudeCollector:
-    def __init__(self, machine: str, config_dirs: list[Path]) -> None:
+    def __init__(
+        self, machine: str, config_dirs: list[Path], state_dir: Path | None = None
+    ) -> None:
         self.machine = machine
+        self.state_dir = state_dir or Path.home() / ".agentdash"
         self.config_dirs = [d for d in config_dirs if d.exists()]
         self._transcripts: dict[str, Path] = {}
 
@@ -122,6 +151,8 @@ class ClaudeCollector:
                 if reg:
                     extra["socket"] = reg.get("messagingSocketPath", "")
                     extra["version"] = reg.get("version", "")
+                facts = tail_facts(tpath) if tpath else {}
+                _describe(extra, facts, sid, self.state_dir)
                 sessions.append(
                     Session(
                         key=Session.make_key(self.machine, Harness.claude, sid),
@@ -138,7 +169,8 @@ class ClaudeCollector:
                         started_at=a.get("startedAt"),
                         updated_at=_activity_ms(tpath, reg, a.get("startedAt")),
                         transcript_path=str(tpath) if tpath else "",
-                        last_line=last_line_preview(tpath) if tpath else "",
+                        last_line=facts.get("last_line", ""),
+                        model=facts.get("model", ""),
                         extra=extra,
                     )
                 )
@@ -149,6 +181,12 @@ class ClaudeCollector:
                     continue
                 cwd = reg.get("cwd", "")
                 tpath = find_transcript(config_dir, sid, cwd)
+                facts = tail_facts(tpath) if tpath else {}
+                extra = {
+                    "config_dir": str(config_dir),
+                    "socket": reg.get("messagingSocketPath", ""),
+                }
+                _describe(extra, facts, sid, self.state_dir)
                 sessions.append(
                     Session(
                         key=Session.make_key(self.machine, Harness.claude, sid),
@@ -164,11 +202,9 @@ class ClaudeCollector:
                         started_at=reg.get("startedAt"),
                         updated_at=_activity_ms(tpath, reg, reg.get("startedAt")),
                         transcript_path=str(tpath) if tpath else "",
-                        last_line=last_line_preview(tpath) if tpath else "",
-                        extra={
-                            "config_dir": str(config_dir),
-                            "socket": reg.get("messagingSocketPath", ""),
-                        },
+                        last_line=facts.get("last_line", ""),
+                        model=facts.get("model", ""),
+                        extra=extra,
                     )
                 )
         return sessions

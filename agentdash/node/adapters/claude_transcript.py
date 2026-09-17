@@ -189,23 +189,54 @@ def read_last(path: Path, n: int, parser=None) -> list[Message]:
     return msgs[-n:]
 
 
-def last_line_preview(path: Path, max_bytes: int = 200_000) -> str:
-    """Cheap preview: last assistant text or user prompt in the tail of the file."""
+def tail_facts(path: Path, max_bytes: int = 200_000) -> dict[str, Any]:
+    """One cheap pass over the tail of a transcript.
+
+    Returns last_line (last assistant text or user prompt), last_user (the most recent
+    real user prompt), context_tokens (prompt size of the last main-thread model call,
+    which is what fills the context window) and model.
+    """
+    facts: dict[str, Any] = {"last_line": "", "last_user": "", "context_tokens": 0, "model": ""}
     try:
         size = path.stat().st_size
         with path.open("rb") as f:
             f.seek(max(0, size - max_bytes))
             data = f.read()
     except OSError:
-        return ""
-    lines = data.split(b"\n")[1:] if size > max_bytes else data.split(b"\n")
-    preview = ""
-    for m in iter_messages(line.decode("utf-8", "replace") for line in lines):
-        if (
-            m.kind == "text"
-            and m.role in ("assistant", "user")
-            and not m.is_meta
-            and not m.agent_id
-        ):
-            preview = m.text
-    return " ".join(preview.split())[:160]
+        return facts
+    raw = data.split(b"\n")[1:] if size > max_bytes else data.split(b"\n")
+    lines = [line.decode("utf-8", "replace") for line in raw]
+    for m in iter_messages(iter(lines)):
+        if m.kind != "text" or m.is_meta or m.agent_id:
+            continue
+        if m.role in ("assistant", "user"):
+            facts["last_line"] = m.text
+            if m.role == "user":
+                facts["last_user"] = m.text
+    for line in reversed(lines):
+        if '"usage"' not in line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        msg = rec.get("message")
+        if rec.get("type") != "assistant" or rec.get("isSidechain") or not isinstance(msg, dict):
+            continue
+        u = msg.get("usage")
+        if not isinstance(u, dict):
+            continue
+        facts["context_tokens"] = sum(
+            int(u.get(k) or 0)
+            for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+        )
+        facts["model"] = str(msg.get("model") or "")
+        break
+    facts["last_line"] = " ".join(facts["last_line"].split())[:160]
+    facts["last_user"] = " ".join(facts["last_user"].split())[:300]
+    return facts
+
+
+def last_line_preview(path: Path, max_bytes: int = 200_000) -> str:
+    """Cheap preview: last assistant text or user prompt in the tail of the file."""
+    return tail_facts(path, max_bytes)["last_line"]
