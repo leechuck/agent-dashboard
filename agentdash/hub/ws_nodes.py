@@ -116,7 +116,9 @@ async def nodes_ws(ws: WebSocket) -> None:
                     )
                 elif frame.type == NODE_USAGE:
                     await state.usage_snapshot(
-                        [UsageWindow.model_validate(w) for w in p.get("windows", [])]
+                        [UsageWindow.model_validate(w) for w in p.get("windows", [])],
+                        machine=link.machine if link else "",
+                        claude_accounts=p.get("claude_accounts"),
                     )
                 elif frame.type == NODE_DECISION_CREATED:
                     await state.decision_created(Decision.model_validate(p))

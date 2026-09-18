@@ -953,8 +953,11 @@ class Node:
         while True:
             try:
                 windows = await self.usage.collect()
-                if windows:
-                    await self.hub.send(NODE_USAGE, {"windows": [w.model_dump() for w in windows]})
+                if windows or self.usage.claude_accounts:
+                    await self.hub.send(NODE_USAGE, {
+                        "windows": [w.model_dump() for w in windows],
+                        "claude_accounts": self.usage.claude_accounts,
+                    })
                 for d, account in self.usage.dead_logins.items():
                     if d not in self._dead_told:  # once per node run, not every ten minutes
                         self._dead_told.add(d)

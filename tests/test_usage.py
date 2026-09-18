@@ -121,3 +121,53 @@ def test_an_account_without_the_limits_list_still_works():
         "seven_day_opus": "Week · Opus",
     }
     assert parse_claude_usage({}, "a") == []
+
+
+async def test_inventory_keeps_accounts_when_usage_fails_and_tries_duplicate_login(tmp_path, monkeypatch):
+    from agentdash.models import UsageWindow
+    from agentdash.node.collectors import usage
+
+    dirs = [tmp_path / n for n in (".claude", ".claude-personal", ".claude-team")]
+    for d in dirs:
+        d.mkdir()
+    monkeypatch.setattr(usage, "discover_claude_dirs", lambda: dirs)
+    monkeypatch.setattr(usage, "account_of", lambda d: {
+        "provider": "anthropic", "plan": "max" if d == dirs[1] else "team",
+        "account": "personal" if d == dirs[1] else "team",
+    })
+    c = UsageCollector("m", dirs, tmp_path)
+    called = []
+
+    async def api(d, account):
+        called.append(d)
+        return [UsageWindow(provider="anthropic", account=account, window="session", used_pct=10)] if d == dirs[2] else []
+
+    monkeypatch.setattr(c, "_claude_from_api", api)
+    got = await c.claude()
+    assert c.claude_accounts == ["personal", "team"]
+    assert called == dirs  # a failed duplicate must not shadow the working login
+    assert [(w.account, w.used_pct) for w in got] == [("team", 10)]
+
+
+async def test_partial_usage_poll_does_not_delete_other_plan(tmp_path):
+    from unittest.mock import Mock
+
+    from agentdash.db import Database
+    from agentdash.hub.state import HubState
+    from agentdash.models import UsageWindow
+
+    db = Database(tmp_path / "hub.db")
+    await db.open()
+    try:
+        state = HubState(db, Mock())
+        personal = UsageWindow(provider="anthropic", account="personal", machine="m", window="session", used_pct=10)
+        team = personal.model_copy(update={"account": "team"})
+        await db.add_usage(personal)
+        await state.usage_snapshot([team])  # old nodes have no explicit inventory
+        assert {w.account for w in await db.latest_usage()} == {"personal", "team"}
+        await state.usage_snapshot([team], "m", ["personal", "team"])
+        assert {w.account for w in await db.latest_usage()} == {"personal", "team"}
+        await state.usage_snapshot([team], "m", ["team"])
+        assert {w.account for w in await db.latest_usage()} == {"team"}
+    finally:
+        await db.close()

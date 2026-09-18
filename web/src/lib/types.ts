@@ -302,7 +302,7 @@ export interface MachineCatalog {
   error?: string
   harnesses: Record<string, boolean>
   tmux: boolean
-  logins: { dir: string; name: string; account: string; plan: string; logged_in: boolean }[]
+  logins: { dir: string; name: string; account: string; plan: string; logged_in: boolean; expired?: boolean }[]
   models: Record<string, ModelChoice[]>
   efforts: Record<string, string[]>
   endpoints: { id: string; key_present: boolean; reachable: boolean; models: string[]; error: string }[]

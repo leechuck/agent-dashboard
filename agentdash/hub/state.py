@@ -234,10 +234,10 @@ class HubState:
         self.bus.publish("decision.updated", d.model_dump())
         return {"ok": True}
 
-    async def usage_snapshot(self, windows: list[UsageWindow]) -> None:
-        by_provider: dict[tuple[str, str], set[str]] = {}
-        for w in windows:
-            by_provider.setdefault((w.machine, w.provider), set()).add(w.account)
+    async def usage_snapshot(
+        self, windows: list[UsageWindow], machine: str = "",
+        claude_accounts: list[str] | None = None,
+    ) -> None:
         for w in windows:
             if w.provider == "anthropic" and " · " in w.account:
                 await self.db.adopt_legacy_usage(w.provider, w.account, w.account.split(" · ")[0])
@@ -259,8 +259,10 @@ class HubState:
                 )
             elif not level:
                 self._usage_alerted.pop(key, None)
-        for (machine, provider), accounts in by_provider.items():
-            await self.db.forget_gone_accounts(machine, provider, sorted(accounts))
+        # Successful quota responses are not an account inventory: one login can fail
+        # while another succeeds. Only prune from an explicit node inventory.
+        if machine and claude_accounts is not None:
+            await self.db.forget_gone_accounts(machine, "anthropic", claude_accounts)
         self.bus.publish("usage.updated", [w.model_dump() for w in windows])
 
     async def on_session_transition(self, s: Any, old_status: str | None) -> None:

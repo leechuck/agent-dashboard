@@ -157,6 +157,7 @@ class UsageCollector:
         self.state_dir = state_dir
         self._claude_version = ""
         self._backoff_until: dict[str, float] = {}
+        self.claude_accounts: list[str] = []
         self.dead_logins: dict[str, str] = {}  # config dir -> account whose token is refused
 
     # ---- Claude -------------------------------------------------------
@@ -249,14 +250,19 @@ class UsageCollector:
         seen: set[str] = set()
         # a login added from the dashboard appears on the next poll, not the next restart
         dirs = dict.fromkeys([*self.claude_dirs, *discover_claude_dirs()])
+        self.claude_accounts = sorted({
+            a["account"] for d in dirs if d.exists()
+            if (a := account_of(d))["provider"] == "anthropic" and a["account"]
+        })
         for d in (d for d in dirs if d.exists()):
             acct = account_of(d)
             if acct["provider"] != "anthropic" or not acct["account"] or acct["account"] in seen:
                 continue  # API-key or gateway dirs have no subscription windows
-            seen.add(acct["account"])
             wins = await self._claude_from_api(d, acct["account"])
             if not wins:  # rate limited or offline: the status line still knows the basics
                 wins = self._claude_from_statusline(d, acct["account"])
+            if wins:
+                seen.add(acct["account"])
             for w in wins:
                 w.detail = {**w.detail, "config_dir": d.name, "plan": acct["plan"]}
             out += wins

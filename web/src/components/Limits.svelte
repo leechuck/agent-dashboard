@@ -2,10 +2,34 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
   import { fleet } from '../lib/store.svelte'
-  import type { UsageWindow } from '../lib/types'
+  import type { Catalog, UsageWindow } from '../lib/types'
 
   let history = $state<Record<string, { t: number; pct: number }[]>>({})
   let now = $state(Date.now())
+  let catalog = $state<Catalog | null>(null)
+  let catalogError = $state('')
+  let loginBusy = $state('')
+  let loginError = $state('')
+  let catalogLoading = false
+  async function loadCatalog() {
+    if (catalogLoading) return
+    catalogLoading = true
+    try { catalog = await api.catalog(); catalogError = '' }
+    catch (e) { catalogError = `Could not check configured plans: ${e}` }
+    finally { catalogLoading = false }
+  }
+  async function signIn(machine: string, login: string) {
+    loginBusy = machine + login
+    loginError = ''
+    try {
+      const r = await api.openLogin(machine, login)
+      if (r.ok && r.terminal_key) location.hash = `#/terminal/${encodeURIComponent(r.terminal_key)}?control=1`
+      else loginError = r.error ?? 'Could not open sign-in.'
+    } catch (e) { loginError = String(e) }
+    finally { loginBusy = '' }
+  }
+  const logins = $derived(Object.entries(catalog?.machines ?? {}).flatMap(([machine, c]) =>
+    (c.logins ?? []).filter(l => l.account).map(l => ({ ...l, machine }))))
   const windows = $derived(fleet.usage)
 
   const names: Record<string, string> = { anthropic: 'Claude', openai: 'Codex', openrouter: 'OpenRouter' }
@@ -22,17 +46,22 @@
   }
 
   const subs = $derived.by(() => {
-    const out: { provider: string; account: string; several: boolean; command: string; machine: string; session?: UsageWindow; week?: UsageWindow; scoped: UsageWindow[]; money: UsageWindow[] }[] = []
+    const out: { provider: string; account: string; several: boolean; command: string; machine: string; session?: UsageWindow; week?: UsageWindow; scoped: UsageWindow[]; money: UsageWindow[]; login?: string; loginMachine?: string; expired: boolean }[] = []
     for (const p of ['anthropic', 'openai']) {
-      const accounts = [...new Set(windows.filter((w) => w.provider === p).map((w) => w.account))].sort()
+      const accounts = [...new Set([...windows.filter((w) => w.provider === p).map((w) => w.account), ...(p === 'anthropic' ? logins.map(l => l.account) : [])])].sort()
       for (const a of accounts) {
         const ws = windows.filter((w) => w.provider === p && w.account === a)
+        const configured = p === 'anthropic' ? logins.filter(l => l.account === a) : []
+        const login = configured.find(l => l.logged_in) ?? configured[0]
         out.push({
           provider: p,
           account: a,
           several: accounts.length > 1,
-          command: String(ws[0].detail?.config_dir ?? '').startsWith('.claude') ? 'claude' + String(ws[0].detail.config_dir).slice(7) : '',
-          machine: ws[0].machine,
+          command: String(ws[0]?.detail?.config_dir ?? login?.dir ?? '').startsWith('.claude') ? 'claude' + String(ws[0]?.detail?.config_dir ?? login?.dir ?? '').slice(7) : '',
+          machine: ws[0]?.machine ?? login?.machine ?? '',
+          login: login?.name,
+          loginMachine: login?.machine,
+          expired: !!configured.length && configured.every(l => l.expired),
           session: ws.find((w) => kindOf(w) === 'session'),
           week: ws.find((w) => kindOf(w) === 'week'),
           scoped: [...ws.filter((w) => kindOf(w) === 'scoped')].sort((a, b) => b.used_pct - a.used_pct),
@@ -88,8 +117,10 @@
   }
   onMount(() => {
     loadHistory()
+    loadCatalog()
+    const c = setInterval(loadCatalog, 60000)
     const t = setInterval(() => (now = Date.now()), 30000)
-    return () => clearInterval(t)
+    return () => { clearInterval(t); clearInterval(c) }
   })
   $effect(() => {
     windows.length
@@ -120,6 +151,9 @@
     <p class="notice muted">No usage data yet. Nodes report every ten minutes.</p>
   {/if}
 
+  {#if catalogError}<p class="notice muted">{catalogError}</p>{/if}
+  {#if loginError}<p role="alert">{loginError}</p>{/if}
+
   {#each useNext as f (f.id)}
     <div class="next"><b>{f.title}.</b> <span class="muted">{f.detail}</span></div>
   {/each}
@@ -130,6 +164,15 @@
         <span class="pname">{names[s.provider] ?? s.provider}</span>
         <span class="muted small">{plans[s.account] ?? s.account}{s.account ? ' · ' : ''}{s.several && s.command ? `start with ${s.command} · ` : ''}via {s.machine}</span>
       </div>
+      {#if s.expired || (!s.session && !s.week)}
+        <p class="small muted">
+          {s.expired ? 'Usage unavailable: this login was rejected. Sign in again to refresh your limits.' : 'Usage unavailable. This plan is configured, but no limits have been reported yet.'}
+          {#if s.expired && s.login && s.loginMachine}
+            <button disabled={!!loginBusy} onclick={() => signIn(s.loginMachine!, s.login!)}>Sign in</button>
+          {/if}
+        </p>
+      {/if}
+      {#if s.expired && (s.session || s.week)}<p class="small muted">Numbers below are the last reported usage, not a fresh check.</p>{/if}
       <div class="pair">
         {@render gauge(s.session, 'Session · rolling 5 hours')}
         {@render gauge(s.week, 'Week · everything')}
