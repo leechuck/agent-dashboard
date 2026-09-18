@@ -60,7 +60,7 @@
           several: accounts.length > 1,
           command: String(ws[0]?.detail?.config_dir ?? login?.dir ?? '').startsWith('.claude') ? 'claude' + String(ws[0]?.detail?.config_dir ?? login?.dir ?? '').slice(7) : '',
           machine: ws[0]?.machine ?? login?.machine ?? '',
-          login: login?.name,
+          login: login?.dir === '.claude' ? 'default' : login?.name,
           loginMachine: login?.machine,
           expired: !!login?.expired && (!ws.length || configured.every(l => l.expired)),
           session: ws.find((w) => kindOf(w) === 'session'),
@@ -164,13 +164,16 @@
       <div class="phead">
         <span class="pname">{names[s.provider] ?? s.provider}</span>
         <span class="muted small">{plans[s.account] ?? s.account}{s.account ? ' · ' : ''}{s.several && s.command ? `start with ${s.command} · ` : ''}via {s.machine}</span>
+        {#if s.login && s.loginMachine}
+          <button disabled={!!loginBusy} onclick={() => signIn(s.loginMachine!, s.login!)}>{loginBusy === s.loginMachine + s.login ? 'Opening login…' : 'Log in'}</button>
+        {:else if s.provider === 'anthropic'}
+          <a class="small" href="#/settings">Log in via Settings</a>
+        {/if}
       </div>
       {#if s.expired || (!s.session && !s.week)}
         <p class="small muted">
           {s.expired ? 'Usage unavailable: this login was rejected. Sign in again to refresh your limits.' : 'Usage unavailable. This plan is configured, but no limits have been reported yet.'}
-          {#if s.expired && s.login && s.loginMachine}
-            <button disabled={!!loginBusy} onclick={() => signIn(s.loginMachine!, s.login!)}>Sign in</button>
-          {/if}
+
         </p>
       {/if}
       {#if s.expired && (s.session || s.week)}<p class="small muted">Numbers below are the last reported usage, not a fresh check.</p>{/if}

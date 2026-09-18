@@ -11,14 +11,19 @@
   let busy = $state(false)
   let err = $state('')
   let copied = $state(false)
+  let loading = $state(true)
+  let reading = false
 
   async function look() {
+    if (reading) return
+    reading = true
     try {
       const r = await api.paneScreen(paneKey)
-      if (r.ok) screen = r.login
-    } catch {
-      /* the terminal is still there */
-    }
+      if (r.ok) { screen = r.login; err = '' }
+      else err = r.error ?? 'Could not read the login screen.'
+    } catch (e) {
+      err = `Cannot reach the login screen: ${e}`
+    } finally { loading = false; reading = false }
   }
   async function press(keys: string[], text = '') {
     busy = true
@@ -55,6 +60,9 @@
   })
 </script>
 
+{#if loading}<p class="login-status small muted">Reading the login screen…</p>{/if}
+{#if err}<p class="login-status err small" role="alert">{err} <button onclick={look}>Retry</button></p>{/if}
+
 {#if screen && screen.stage !== 'other'}
   <div class="lh">
     {#if screen.stage === 'theme'}
@@ -80,11 +88,12 @@
       <span class="ok">Logged in. Limits shows this plan within a minute.</span>
       {#if screen.continue}<button disabled={busy} onclick={() => press(['Enter'])}>Continue</button>{/if}
     {/if}
-    {#if err}<span class="err small">{err}</span>{/if}
+
   </div>
 {/if}
 
 <style>
+  .login-status { padding: 8px 16px; }
   .lh { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; padding: 10px 16px; background: var(--cobalt-soft); border-bottom: 1px solid var(--hairline); }
   .step { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
   .step input { flex: 1 1 260px; padding: 6px 8px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--surface); font-family: var(--mono, monospace); }

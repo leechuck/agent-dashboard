@@ -77,7 +77,10 @@
   // ----- Claude logins
   let loginName = $state<Record<string, string>>({})
   let loginMsg = $state<Record<string, string>>({})
+  let loginOpening = $state('')
   async function openLogin(machine: string, name: string) {
+    if (loginOpening) return
+    loginOpening = machine
     loginMsg[machine] = 'Opening Claude…'
     try {
       const r = await api.openLogin(machine, name)
@@ -87,7 +90,7 @@
       } else loginMsg[machine] = r.error ?? 'failed'
     } catch (e) {
       loginMsg[machine] = String(e)
-    }
+    } finally { loginOpening = '' }
   }
 
   let titlesMsg = $state('')
@@ -345,12 +348,12 @@
             <div class="lrow">
               <span><b>{l.name}</b> <span class="muted small">~/{l.dir}</span></span>
               <span class={l.logged_in ? 'good small' : 'bad small'}>{l.logged_in ? l.account : 'not logged in'}</span>
-              <button type="button" onclick={() => openLogin(m, l.dir === '.claude' ? 'default' : l.name)}>{l.logged_in ? 'Log in again' : 'Log in'}</button>
+              <button type="button" disabled={!!loginOpening} onclick={() => openLogin(m, l.dir === '.claude' ? 'default' : l.name)}>{l.logged_in ? 'Log in again' : 'Log in'}</button>
             </div>
           {/each}
           <div class="lrow">
             <input placeholder="another subscription, e.g. personal" value={loginName[m] ?? ''} oninput={(e) => (loginName[m] = e.currentTarget.value.replace(/[^a-z0-9_-]/g, ''))} onkeydown={(e) => { if (e.key === 'Enter' && loginName[m]) openLogin(m, loginName[m]) }} />
-            <button type="button" disabled={!loginName[m]} onclick={() => openLogin(m, loginName[m])}>Add and log in</button>
+            <button type="button" disabled={!loginName[m] || !!loginOpening} onclick={() => openLogin(m, loginName[m])}>Add and log in</button>
           </div>
           {#if loginMsg[m]}<p class="small bad inner">{loginMsg[m]}</p>{/if}
         </div>
