@@ -170,7 +170,7 @@
       {#if resumable && elsewhere}<button class="swbtn" onclick={() => { moving = !moving; if (moving) switching = false }}>Move to another machine…</button>{/if}
     </div>
     {#if resumeMsg}<p class="small" class:okmsg={!resumeMsg.startsWith('Resuming') && resumeMsg.startsWith('Resumed')}>{resumeMsg}</p>{/if}
-    {#if switching}<SwitchPanel {session} onclose={() => (switching = false)} />{/if}
+    {#if switching}{#key session.key}<SwitchPanel {session} onclose={() => (switching = false)} />{/key}{/if}
     {#if moving}<MovePanel {session} onclose={() => (moving = false)} />{/if}
     <div class="tools small">
       <label><input type="checkbox" bind:checked={showExec} /> exec messages</label>

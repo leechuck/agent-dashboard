@@ -160,7 +160,24 @@ class Catalog:
         self.s = s
         self._cache: tuple[float, str, dict[str, Any]] | None = None
 
-    async def get(self, endpoints: list[Endpoint], fresh: bool = False) -> dict[str, Any]:
+    async def get(
+        self, endpoints: list[Endpoint], fresh: bool = False, quick: bool = False
+    ) -> dict[str, Any]:
+        if quick:
+            # Switching subscriptions must not wait for unrelated network/model probes.
+            installed = {h: bool(shutil.which(h)) for h in HARNESSES}
+            return {
+                "ok": True,
+                "harnesses": installed,
+                "tmux": bool(shutil.which("tmux")),
+                "logins": claude_logins(self.s, {e.id for e in endpoints}),
+                "models": {
+                    "claude": CLAUDE_MODELS,
+                    "codex": codex_models() if installed["codex"] else [],
+                },
+                "efforts": EFFORTS,
+                "endpoints": [],
+            }
         sig = json.dumps([e.__dict__ for e in endpoints], sort_keys=True)
         if (
             not fresh

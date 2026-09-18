@@ -364,12 +364,15 @@ async def session_commands(key: str, request: Request):
 
 
 @router.get("/catalog")
-async def catalog(request: Request, fresh: bool = False):
+async def catalog(request: Request, fresh: bool = False, machine: str = "", quick: bool = False):
     """Per machine: installed harnesses, Claude logins, models, and which endpoints work there."""
     st = _state(request)
-    machines = sorted(st.nodes)
+    machines = [machine] if machine else sorted(st.nodes)
     results = await asyncio.gather(
-        *(_node_call(request, m, "catalog.get", {"fresh": fresh}, timeout=40) for m in machines),
+        *(
+            _node_call(request, m, "catalog.get", {"fresh": fresh, "quick": quick}, timeout=40)
+            for m in machines
+        ),
         return_exceptions=True,
     )
     return {

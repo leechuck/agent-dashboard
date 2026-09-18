@@ -64,6 +64,7 @@ from .launcher import (
     Endpoint,
     LaunchError,
     LaunchSpec,
+    build,
     claude_config_dir,
     handover_prompt,
     launch,
@@ -555,7 +556,9 @@ class Node:
     async def catalog_get(self, p: dict[str, Any]) -> None:
         self.s.claude_config_dirs = discover_claude_dirs()
         self.claude.config_dirs = [d for d in self.s.claude_config_dirs if d.exists()]
-        result = await self.catalog.get(self._endpoints(p), fresh=bool(p.get("fresh")))
+        result = await self.catalog.get(
+            self._endpoints(p), fresh=bool(p.get("fresh")), quick=bool(p.get("quick"))
+        )
         for login in result.get("logins") or []:
             if str(Path.home() / login.get("dir", "")) in self.usage.dead_logins:
                 login["logged_in"], login["expired"] = False, True  # its token no longer works
@@ -814,6 +817,14 @@ class Node:
         target = LaunchSpec.parse(
             {**p, "cwd": p.get("cwd") or sess.cwd, "harness": p.get("harness") or sess.harness}
         )
+        # Validate the executable, endpoint and model before stopping the source agent.
+        build(target, self.s, self._endpoints(p))
+        if not Path(target.cwd).expanduser().is_dir():
+            raise LaunchError(f"no such directory: {target.cwd}")
+        import shutil
+
+        if not shutil.which("tmux"):
+            raise LaunchError("tmux is not installed on this machine")
         same_harness = target.harness == sess.harness
         if same_harness:
             # same conversation, other login / model / endpoint: restart it with --resume
@@ -954,10 +965,13 @@ class Node:
             try:
                 windows = await self.usage.collect()
                 if windows or self.usage.claude_accounts:
-                    await self.hub.send(NODE_USAGE, {
-                        "windows": [w.model_dump() for w in windows],
-                        "claude_accounts": self.usage.claude_accounts,
-                    })
+                    await self.hub.send(
+                        NODE_USAGE,
+                        {
+                            "windows": [w.model_dump() for w in windows],
+                            "claude_accounts": self.usage.claude_accounts,
+                        },
+                    )
                 for d, account in self.usage.dead_logins.items():
                     if d not in self._dead_told:  # once per node run, not every ten minutes
                         self._dead_told.add(d)

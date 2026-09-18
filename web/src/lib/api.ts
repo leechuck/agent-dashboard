@@ -44,7 +44,7 @@ export const api = {
       body: JSON.stringify(spec),
     }),
   commands: (key: string) => j<{ ok: boolean; commands: SlashCommand[]; error?: string }>(`/api/sessions/${encodeURIComponent(key)}/commands`),
-  catalog: (fresh = false) => j<Catalog>(`/api/catalog?fresh=${fresh}`),
+  catalog: (fresh = false, machine = '', quick = false) => j<Catalog>(`/api/catalog?fresh=${fresh}&machine=${encodeURIComponent(machine)}&quick=${quick}`),
   saveEndpoints: (endpoints: Endpoint[]) => j<{ ok: boolean }>('/api/settings/endpoints', { method: 'PUT', body: JSON.stringify({ endpoints }) }),
   openLogin: (machine: string, name: string) =>
     j<{ ok: boolean; error?: string; terminal_key?: string; attach?: string }>(`/api/machines/${encodeURIComponent(machine)}/logins`, { method: 'POST', body: JSON.stringify({ name }) }),
