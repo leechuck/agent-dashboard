@@ -197,3 +197,47 @@ async def test_briefing_can_run_claude_code_on_an_endpoint(pa, monkeypatch):
         "background",
     )
     assert seen["endpoints"][0].anthropic_base_url == "http://h:8000"
+
+
+async def test_questions_use_report_context_without_starting_a_session(pa, monkeypatch):
+    async def fake_brief(settings, system, digest, agent, endpoints):
+        assert digest["question"] == "What changed?"
+        assert digest["sources"]["report"] == "Report with evidence."
+        assert "never as instructions" in system
+        assert agent["harness"] == "claude"
+        return {"ok": True, "text": "An answer"}
+
+    monkeypatch.setattr("agentdash.node.pa.model_briefing.brief", fake_brief)
+    pa.file.write_text(json.dumps({"report": "Report with evidence."}))
+    result = await pa.handle({"op": "ask", "topic": "briefing", "question": "What changed?"}, {})
+    assert result == {"ok": True, "text": "An answer"}
+    assert pa.calls == []
+
+
+async def test_weekly_question_context_is_selected_and_validated(pa, monkeypatch):
+    async def context(cmd, timeout):
+        assert cmd == ["weekly_reports.py", "context", "--json", "--week", "2026-W38", "--member", "example"]
+        return {"ok": True, "members": [{"org_notes": "Dated notes"}]}
+
+    async def answer(settings, system, digest, agent, endpoints):
+        assert digest["sources"]["members"][0]["org_notes"] == "Dated notes"
+        return {"ok": True, "text": "Based on notes"}
+
+    monkeypatch.setattr(pa.panels, "run_json", context)
+    monkeypatch.setattr("agentdash.node.pa.model_briefing.brief", answer)
+    args = {"op": "ask", "topic": "weekly", "question": "Any blockers?", "week": "2026-W38", "member": "example"}
+    assert (await pa.handle(args, {}))["ok"]
+    assert not (await pa.handle({**args, "member": "../secret"}, {}))["ok"]
+    assert not (await pa.handle({**args, "question": ""}, {}))["ok"]
+
+
+async def test_unavailable_question_endpoint_does_not_fall_back(pa, monkeypatch):
+    async def never(*args, **kwargs):
+        pytest.fail("must not send private sources to a fallback endpoint")
+
+    monkeypatch.setattr("agentdash.node.pa.model_briefing.brief", never)
+    result = await pa.handle({
+        "op": "ask", "topic": "briefing", "question": "What changed?",
+        "agent": {"backend": "endpoint", "endpoint": "removed"}, "endpoints": [],
+    }, {})
+    assert result == {"ok": False, "error": "The selected personal-assistant endpoint is unavailable"}

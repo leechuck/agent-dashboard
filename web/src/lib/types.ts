@@ -196,6 +196,7 @@ export interface PAState {
     generated_at?: string
     file_mtime?: number
     summary?: string
+    report?: string
     schedule?: { when: string; what: string; note?: string }[]
     deadlines?: { date: string; what: string; project?: string }[]
     items: PAItem[]
@@ -333,4 +334,20 @@ export interface SlashCommand {
   options: { value: string; label: string }[]
   /** anything may follow; only the hint is shown */
   free: boolean
+}
+
+export interface WeeklyReports {
+  ok: boolean
+  error?: string
+  week: string
+  checked_at: string
+  deadline: string
+  warning?: string
+  members: {
+    slug: string; name: string; role: string
+    status: 'received' | 'awaiting' | 'overdue' | 'exempt' | 'unknown'
+    date?: string; subject?: string; message_id?: string; error?: string
+    flags?: string[]; report: string
+    followups?: { message_id: string; date: string; body: string; attachments: { file: string; text: string }[] }[]
+  }[]
 }

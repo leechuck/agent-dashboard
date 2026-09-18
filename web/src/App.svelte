@@ -13,19 +13,18 @@
   // the terminal brings xterm.js (a third of the bundle): fetched only when one is opened
   const terminalView = () => import('./components/Terminal.svelte')
   import Overview from './components/Overview.svelte'
-  import PersonalBriefing from './components/PersonalBriefing.svelte'
   import Personal from './components/Personal.svelte'
 
   let route = $state(parse(location.hash))
 
-  function parse(hash: string): { page: string; key?: string; q?: URLSearchParams } {
+  function parse(hash: string): { page: string; key?: string; q?: URLSearchParams; tab?: string } {
     const h = hash.replace(/^#\/?/, '')
     if (h.startsWith('new')) return { page: 'new', q: new URLSearchParams(h.split('?')[1] ?? '') }
     if (h === 'login') return { page: 'login' }
     if (h === 'settings') return { page: 'settings' }
     if (h === 'limits') return { page: 'limits' }
     if (h === 'overview' || h === 'cockpit') return { page: 'overview' }
-    if (h === 'personal') return { page: 'personal' }
+    if (h === 'personal' || h.startsWith('personal/')) return { page: 'personal', tab: h.split('/')[1] || 'briefing' }
     if (h.startsWith('decisions')) return { page: 'decisions' }
     if (h.startsWith('history/')) return { page: 'history', key: decodeURIComponent(h.slice(8)) }
     if (h === 'history') return { page: 'history' }
@@ -86,7 +85,7 @@
         {:else if route.key}
           <SessionView key={route.key} />
         {:else if route.page === 'personal'}
-          <Personal wide />
+          <Personal wide tab={route.tab} />
         {:else if route.page === 'overview'}
           <Overview />
         {/if}
@@ -108,7 +107,7 @@
     {:else if route.page === 'overview'}
       <Overview />
     {:else if route.page === 'personal'}
-      <Personal />
+      <Personal tab={route.tab} />
     {:else}
       <Fleet selected={undefined} cockpitCard layout="board" />
     {/if}

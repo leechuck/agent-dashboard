@@ -2,24 +2,21 @@
   import AgendaPanel from './AgendaPanel.svelte'
   import PersonalBriefing from './PersonalBriefing.svelte'
   import TodoPanel from './TodoPanel.svelte'
-
-  let { wide = false }: { wide?: boolean } = $props()
+  import WeeklyReports from './WeeklyReports.svelte'
+  let { wide = false, tab = 'briefing' }: { wide?: boolean; tab?: string } = $props()
+  const tabs = [['briefing', 'Briefing'], ['weekly', 'Weekly reports'], ['tasks', 'Tasks'], ['calendar', 'Calendar']]
 </script>
-
-<div class="personal" class:wide>
-  <div class="col">
-    <AgendaPanel />
-    <TodoPanel />
-  </div>
-  <div class="col">
-    <PersonalBriefing {wide} />
-  </div>
-</div>
-
+<nav aria-label="Personal views">
+  {#each tabs as [id, label]}
+    <a href={`#/personal/${id}`} aria-current={tab === id ? 'page' : undefined}>{label}</a>
+  {/each}
+</nav>
+{#if tab === 'weekly'}<WeeklyReports />
+{:else if tab === 'tasks'}<TodoPanel />
+{:else if tab === 'calendar'}<AgendaPanel />
+{:else}<PersonalBriefing {wide} />{/if}
 <style>
-  .personal { display: grid; gap: 0 8px; padding-bottom: 32px; }
-  .col { min-width: 0; }
-  @media (min-width: 1500px) {
-    .personal.wide { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
-  }
+  nav { display: flex; gap: 18px; padding: 14px 16px; border-bottom: 1px solid var(--hairline); overflow-x: auto; white-space: nowrap; }
+  a { color: var(--muted); font-size: 14px; }
+  a[aria-current] { color: var(--cobalt); font-weight: 600; }
 </style>

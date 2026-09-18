@@ -78,6 +78,9 @@ export const api = {
   saveAgentSettings: (agents: AgentSettings) => j<{ ok: boolean; agents: AgentSettings }>('/api/settings/agents', { method: 'PUT', body: JSON.stringify(agents) }),
   pa: () => j<PAState>('/api/pa'),
   paRun: (focus = '') => j<{ ok: boolean; error?: string; already_running?: boolean }>('/api/pa/run', { method: 'POST', body: JSON.stringify({ focus }) }),
+  paAsk: (question: string, topic = 'briefing', week = '', member = '', history: { question: string; text: string }[] = []) =>
+    j<{ ok: boolean; error?: string; text?: string }>('/api/pa/ask', { method: 'POST', body: JSON.stringify({ question, topic, week, member, history }) }),
+  paWeekly: (week = '', refresh = false) => j<import('./types').WeeklyReports>('/api/pa/act', { method: 'POST', body: JSON.stringify({ act: refresh ? 'weekly_collect' : 'weekly_show', args: { week } }) }),
   paPanel: <T>(name: string, fresh = false) => j<T>(`/api/pa/panel/${name}${fresh ? '?fresh=true' : ''}`),
   paAct: (act: string, args: Record<string, unknown> = {}) => j<PAActResult>('/api/pa/act', { method: 'POST', body: JSON.stringify({ act, args }) }),
   paItem: (id: string, op: 'send_email' | 'discard' | 'mark', extra: { body?: string | null; status?: string; note?: string } = {}) =>

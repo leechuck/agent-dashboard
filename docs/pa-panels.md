@@ -82,3 +82,40 @@ as a `pa.reminder` event; the hub pushes it on and neither stores nor broadcasts
 Point a development node at a scratch copy: `AGENTDASH_PA_DIR=<scratch>` with a
 `CLAUDE.md`, the scripts and a made-up `deadlines.md`, and `PA_ORG_DIR=<scratch>/org` so
 the org views are not written into the real org directory.
+
+## Personal views and weekly reports
+
+`#/personal` opens Briefing. `#/personal/weekly`, `/tasks` and `/calendar` select
+separate views; only the selected view mounts or reads its data. The message
+briefing uses `dashboard_briefing.json.report` (Markdown); legacy summary/items
+still work, with source/action controls collapsed and an invitation to regenerate.
+The generation prompt asks for message developments and evidence across mail,
+Mattermost and WhatsApp, without creating tasks, reminders or drafts by default.
+
+The weekly view uses `POST /api/pa/act`:
+
+| act | args | command |
+|---|---|---|
+| `weekly_show` | `week?` (ISO `YYYY-Www`) | `weekly_reports.py show --json [--week W]` |
+| `weekly_collect` | `week?` | `weekly_reports.py collect --json [--week W]` |
+
+Show reads the existing snapshot; only the explicit check button scans local mail.
+Collect has a 300-second timeout. JSON contains `ok`, `week`, `checked_at`,
+`deadline`, `warning`, and a `members` array with `slug`, `name`, `role`, `status`,
+`report`, optional `date`, `flags`, `error`, and `followups`. Status is received,
+awaiting (checked before end of Friday in Asia/Riyadh), overdue (checked after),
+exempt, or unknown (unchecked/failed). Status is as of the check, not a claim about
+mail arriving afterwards. Old undated missing records become unknown. Weeks are
+Monday through Sunday without overlap. Receipt and mechanical content flags are
+separate; image-only reports may require visual reading.
+
+`POST /api/pa/ask` takes `question`, `topic` (`briefing` or `weekly`), optional
+`week`, `member`, and up to eight previous question/answer pairs. Weekly questions
+require a roster member; the node runs `weekly_reports.py context --json --week W
+--member SLUG` to read their report, follow-ups and org notes. Briefing questions
+read the current briefing JSON. Answers use the configured personal assistant
+login/model or endpoint through the existing tool-free model call and return
+`{ok, text}` or `{ok: false, error}`. No agent session or outgoing message is
+created. Personal context and answers are relayed, not stored by the hub.
+
+Deploy the updated PA script on the PA node together with these dashboard changes.

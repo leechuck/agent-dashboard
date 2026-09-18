@@ -656,7 +656,7 @@ async def _pa(request: Request, payload: dict, timeout: float = 120) -> dict:
     st = _state(request)
     agents = await _agents(request)
     prefer = agents["personal"]["machine"]
-    if payload.get("op") == "run":
+    if payload.get("op") in ("run", "ask"):
         payload = {
             **payload,
             "agent": agents["personal"],
@@ -687,6 +687,19 @@ class PARunBody(BaseModel):
 @router.post("/pa/run")
 async def pa_run(body: PARunBody, request: Request):
     return await _pa(request, {"op": "run", "focus": body.focus})
+
+
+class PAAskBody(BaseModel):
+    history: list[dict[str, str]] = []
+    question: str
+    topic: str = "briefing"
+    week: str = ""
+    member: str = ""
+
+
+@router.post("/pa/ask")
+async def pa_ask(body: PAAskBody, request: Request):
+    return await _pa(request, {**body.model_dump(), "op": "ask"}, timeout=240)
 
 
 class PAItemBody(BaseModel):

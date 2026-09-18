@@ -117,8 +117,26 @@ def _calendar_remind(a: dict[str, Any]) -> list[str]:
     ]
 
 
+def weekly_args(verb: str, args: dict[str, Any]) -> list[str]:
+    cmd = ["weekly_reports.py", verb, "--json"]
+    week = _need(args, "week", re.compile(r"^[0-9]{4}-W[0-9]{2}$"), optional=True)
+    if week:
+        from datetime import date
+
+        try:
+            date.fromisocalendar(int(week[:4]), int(week[6:]), 1)
+        except ValueError as e:
+            raise PanelError("invalid ISO week") from e
+        cmd += ["--week", week]
+    if verb == "context":
+        cmd += ["--member", _need(args, "member", _SLUG)]
+    return cmd
+
+
 # act -> (argument builder, timeout, panels whose cached result is now stale)
 ACTS: dict[str, tuple[Callable[[dict[str, Any]], list[str]], int, tuple[str, ...]]] = {
+    "weekly_show": (lambda a: weekly_args("show", a), 30, ()),
+    "weekly_collect": (lambda a: weekly_args("collect", a), 300, ()),
     "todo_add": (_todo_add, 60, ("todo",)),
     "todo_done": (_todo_done, 60, ("todo",)),
     "todo_reopen": (_todo_simple("reopen"), 60, ("todo",)),

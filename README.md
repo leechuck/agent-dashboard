@@ -15,12 +15,12 @@ What it does:
   with prompts you can send with one tap, edit first, or copy. Which agent
   gives the advice (Claude Code, Codex or an API endpoint, model, machine) is
   set on the Settings page; it runs only on request (ADR 0004).
-- **Personal** (own tab): starts the personal-assistant agent in
-  `~/pa`, shows what it found across mail, Mattermost, WhatsApp, calendar and
-  deadlines, lets you edit and send its mail drafts through the running Emacs
-  (Gnus) and nothing else, and hands tasks to a running agent or a new one in
-  the right folder (`~/pa/configs/workspaces.yaml`). Findings and suggestions
-  in the Cockpit can be silenced for hours, days or for good (ADR 0005).
+- **Personal**: a message briefing from mail, Mattermost and WhatsApp, with
+  source links, follow-up questions and folded action details. Separate **Weekly
+  reports**, **Tasks** and **Calendar** tabs keep the default view focused. Weekly
+  reports show receipt per group member, check times and review flags; expand a
+  report to ask questions grounded in it and the person's org notes. Mail checks
+  run only on request. Draft sending still goes through Gnus (ADR 0005).
 - **Fleet**: a board of large cards, one per agent, titled by a small model
   after what the agent is actually working on; opening one slides the session
   in, the board folds into a side rail, and a chip bar or the arrow keys hop

@@ -141,3 +141,17 @@ async def test_a_hanging_script_is_killed(repo, monkeypatch):
 def test_every_act_names_panels_that_exist():
     for _, _, stale in ACTS.values():
         assert set(stale) <= set(PANELS)
+
+
+async def test_weekly_commands_validate_week_and_do_not_refresh_on_read(repo):
+    fake(repo, "weekly_reports.py")
+    p = Panels(repo)
+    await p.act("weekly_show", {"week": "2026-W38"})
+    await p.act("weekly_collect", {"week": "2026-W38"})
+    assert calls(repo) == [
+        ["show", "--json", "--week", "2026-W38"],
+        ["collect", "--json", "--week", "2026-W38"],
+    ]
+    for week in ("../../etc", "2026-W54", "--out=/tmp"):
+        with pytest.raises(PanelError):
+            await p.act("weekly_show", {"week": week})

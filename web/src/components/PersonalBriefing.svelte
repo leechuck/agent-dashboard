@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { renderMarkdown } from '../lib/markdown'
+  import ReportQuestions from './ReportQuestions.svelte'
   import { api } from '../lib/api'
   import { Fleet, fleet } from '../lib/store.svelte'
   import { ago, displayName } from '../lib/format'
@@ -161,7 +163,7 @@
 
 <section class="pa">
   <div class="head">
-    <h2>Personal briefing</h2>
+    <h2>Message briefing</h2>
     {#if running}
       <span class="small live">assistant is working…</span>
     {:else if generated}
@@ -170,7 +172,7 @@
     {#if pa?.session}<a class="small" href={`#/session/${encodeURIComponent(pa.session.key)}`} {target}>session{wide ? ' ↗' : ''}</a>{/if}
     <span class="push"></span>
     <button class="ghost" onclick={() => (showFocus = !showFocus)} title="Add a note for this run">note</button>
-    <button disabled={starting || running || !pa?.ok} onclick={run}>{b ? 'New briefing' : 'Get briefing'}</button>
+    <button disabled={starting || running || !pa?.ok} onclick={run}>{b ? 'Generate new report' : 'Generate report'}</button>
   </div>
   {#if showFocus}
     <input class="focus" bind:value={focus} placeholder="Optional: what to look at first, e.g. 'only mail since Monday'" />
@@ -182,28 +184,15 @@
   {:else if pa && !pa.ok}
     <p class="small err">{pa.error}</p>
   {:else if !b}
-    <p class="small muted">The assistant in ~/pa reads mail, Mattermost, WhatsApp, calendar and deadlines, drafts the replies it can, and turns the rest into tasks you can hand to other agents. Nothing is sent without you.</p>
+    <p class="small muted">Generate a report from mail, Mattermost and WhatsApp: recent developments, decisions and context, with links to the messages. Add a note to focus the report on a topic or period.</p>
   {:else}
     {#if b.summary}<p class="summary">{b.summary}</p>{/if}
 
-    {#if (b.schedule?.length ?? 0) + (b.deadlines?.length ?? 0) > 0}
-      <details class="cal">
-        <summary>{b.schedule?.length ?? 0} on the calendar · {b.deadlines?.length ?? 0} deadlines</summary>
-        <div class="cols">
-          <ul>
-            {#each b.schedule ?? [] as e}
-              <li><span class="when">{e.when.replace('T', ' ').slice(0, 16)}</span> {e.what}{#if e.note}<span class="warnnote"> {e.note}</span>{/if}</li>
-            {/each}
-          </ul>
-          <ul>
-            {#each b.deadlines ?? [] as d}
-              <li><span class="when">{d.date}</span> {d.what}</li>
-            {/each}
-          </ul>
-        </div>
-      </details>
-    {/if}
-
+    {#if b.report}<div class="report">{@html renderMarkdown(b.report)}</div>
+    {:else}<p class="small muted">This is an older briefing. Generate a new report for the message-focused view.</p>{/if}
+    {#key generated}<ReportQuestions />{/key}
+    <details class="actions">
+      <summary>Sources and actions ({items.length})</summary>
     <ul class="items">
       {#each sorted as item (item.id)}
         {@const isOpen = openItem === item.id}
@@ -292,6 +281,7 @@
     {#if hidden > 0 || showAll}
       <button class="ghost small" onclick={() => (showAll = !showAll)}>{showAll ? 'Hide handled items' : `Show ${hidden} handled`}</button>
     {/if}
+    </details>
   {/if}
 </section>
 
@@ -308,13 +298,9 @@
   .summary { margin: 4px 0 10px; max-width: 68ch; }
   .err { color: var(--signal); }
   .okmsg { color: var(--moss); }
-  .cal { margin: 0 0 10px; font-size: 13px; }
-  .cal summary { cursor: pointer; color: var(--muted); }
-  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0 24px; }
-  .cal ul { list-style: none; margin: 6px 0 0; padding: 0; }
-  .cal li { padding: 3px 0; border-bottom: 1px solid var(--hairline); }
-  .when { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-right: 6px; }
-  .warnnote { color: var(--amber); }
+  .report { max-width: 85ch; overflow-wrap: anywhere; }
+  .actions { margin: 18px 0; }
+  .actions > summary { cursor: pointer; color: var(--muted); margin-bottom: 10px; }
   .items { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
   .item { background: var(--surface); border: 1px solid var(--hairline); border-left: 3px solid var(--hairline); border-radius: var(--radius); }
   .item.now { border-left-color: var(--signal); }

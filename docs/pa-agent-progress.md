@@ -53,3 +53,21 @@ Contract between the node and the PA scripts: `docs/pa-panels.md`.
 - Calendar clashes: a recurring self-block without guests ("Lunch") against a long
   seminar is flagged like any clash. Marking such blocks "free" in Google Calendar removes
   them from clash detection; or say so and they get treated as soft.
+
+## Revision, 2026-09-18
+
+Robert approved a report-focused Personal area after review. Briefing is now the
+default; Weekly reports, Tasks and Calendar are separate tabs. Briefing generation
+produces sourced message reports; actions remain folded and no drafts/tasks are
+created by default. Weekly reports reuse the PA roster, collector and org notes,
+with on-demand mail checks and tool-free questions using the Personal model.
+Collector errors yield unknown; pre-deadline absence yields awaiting; check times
+and content flags are explicit. Channels, mail statistics and the full delegation
+tracker remain separate future work.
+
+Validation: 111 dashboard tests and 12 weekly-report tests passed. Dashboard lint,
+Svelte/TypeScript checks and build passed (10 existing Svelte warnings). Browser
+checks at 412 and 1500 px exercised tab routing, lazy panel reads, folded sources,
+report expansion, questions and explicit mail refresh without real sends/model
+calls. The full PA suite still has four existing `test_kg` errors from an unfilled
+contact template. Deployment is separate from this implementation.
