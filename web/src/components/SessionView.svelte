@@ -17,6 +17,7 @@
   const ctx = $derived(session ? contextOf(session) : null)
   const parent = $derived(x.parent ? fleet.sessions[x.parent] : undefined)
   let showThinking = $state(false)
+  let showExec = $state(false)
   let switching = $state(false)
   let moving = $state(false)
   let resumeMsg = $state('')
@@ -70,7 +71,7 @@
   })
 
   $effect(() => {
-    messages.length
+    visible.length
     if (stickBottom && list) queueMicrotask(() => list && (list.scrollTop = list.scrollHeight))
   })
 
@@ -79,8 +80,17 @@
     stickBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80
   }
 
+  // Results may omit the tool name; pair them with their execution call.
+  function isExec(name: string): boolean {
+    return ['exec', 'exec_command', 'bash', 'shell', 'shell_command', 'write_stdin'].includes(name.split('.').at(-1)?.toLowerCase() ?? '')
+  }
+  const execIds = $derived(new Set(messages.filter((m) => m.kind === 'tool_use' && isExec(m.tool_name) && m.tool_use_id).map((m) => m.tool_use_id)))
   const visible = $derived(
-    messages.filter((m) => (showThinking || m.kind !== 'thinking') && (showMeta || !m.is_meta)),
+    messages.filter((m) =>
+      (showThinking || m.kind !== 'thinking') &&
+      (showMeta || !m.is_meta) &&
+      (showExec || !(['tool_use', 'tool_result'].includes(m.kind) && (isExec(m.tool_name) || execIds.has(m.tool_use_id)))),
+    ),
   )
 
   const canSend = $derived(Fleet.canSend(session))
@@ -163,6 +173,7 @@
     {#if switching}<SwitchPanel {session} onclose={() => (switching = false)} />{/if}
     {#if moving}<MovePanel {session} onclose={() => (moving = false)} />{/if}
     <div class="tools small">
+      <label><input type="checkbox" bind:checked={showExec} /> exec messages</label>
       <label><input type="checkbox" bind:checked={showThinking} /> thinking</label>
       <label><input type="checkbox" bind:checked={showMeta} /> system context</label>
       {#if session.native_url}
@@ -174,7 +185,7 @@
   <div class="list" bind:this={list} onscroll={onScroll}>
     {#if visible.length === 0}
       <p class="notice muted">
-        {#if !session.transcript_path}No transcript is available for this session.{:else if loading}<span class="spin"></span> Loading transcript…{:else}No messages yet.{/if}
+        {#if !session.transcript_path}No transcript is available for this session.{:else if loading}<span class="spin"></span> Loading transcript…{:else}{messages.length ? 'No messages match the current filters.' : 'No messages yet.'}{/if}
       </p>
     {/if}
     {#each visible as m (m.id)}
