@@ -79,7 +79,7 @@
         {:else if route.page === 'limits'}
           <Limits />
         {:else if route.page === 'terminal' && route.key}
-          {#await terminalView() then T}<T.default key={route.key} control={route.q?.get('control') === '1'} />{/await}
+          {#key route.key}{#await terminalView() then T}<T.default key={route.key} control={route.q?.get('control') === '1'} />{/await}{/key}
         {:else if route.page === 'new'}
           <NewSession machine={route.q?.get('machine') ?? ''} resume={route.q?.get('resume') ?? ''} title={route.q?.get('cwd') ?? ''} />
         {:else if route.key}
@@ -99,7 +99,7 @@
     {:else if route.page === 'limits'}
       <Limits />
     {:else if route.page === 'terminal' && route.key}
-      {#await terminalView() then T}<T.default key={route.key} control={route.q?.get('control') === '1'} />{/await}
+      {#key route.key}{#await terminalView() then T}<T.default key={route.key} control={route.q?.get('control') === '1'} />{/await}{/key}
     {:else if route.page === 'new'}
       <NewSession machine={route.q?.get('machine') ?? ''} resume={route.q?.get('resume') ?? ''} title={route.q?.get('cwd') ?? ''} />
     {:else if route.page === 'session' && route.key}

@@ -16,6 +16,8 @@
     if (control) term?.focus() // the button took the focus; give it back to the terminal
   }
   let status = $state('connecting')
+  let error = $state('')
+  let reconnect = () => {}
   let ws: WebSocket | null = null
   let term: Terminal | null = null
 
@@ -32,23 +34,59 @@
     term.open(host!)
     fit.fit()
     if (control) term.focus()
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    ws = new WebSocket(`${proto}://${location.host}/api/terminal/${encodeURIComponent(key)}?cols=${term.cols}&rows=${term.rows}`)
-    ws.binaryType = 'arraybuffer'
-    ws.onopen = () => (status = 'live')
-    ws.onclose = () => (status = 'closed')
-    ws.onerror = () => (status = 'error')
-    ws.onmessage = (ev) => {
-      if (ev.data instanceof ArrayBuffer) term!.write(new Uint8Array(ev.data))
-      else {
-        try {
-          const m = JSON.parse(ev.data)
-          if (m.type === 'error') status = m.message
-        } catch {
-          term!.write(ev.data)
+    let timer: ReturnType<typeof setTimeout>
+    reconnect = () => {
+      const previous = ws
+      ws = null
+      previous?.close()
+      clearTimeout(timer)
+      error = ''
+      status = 'connecting'
+      term!.reset()
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+      const socket = new WebSocket(`${proto}://${location.host}/api/terminal/${encodeURIComponent(key)}?cols=${term!.cols}&rows=${term!.rows}`)
+      ws = socket
+      socket.binaryType = 'arraybuffer'
+      timer = setTimeout(() => {
+        if (ws !== socket) return
+        error = 'The terminal did not respond. Check that its machine is connected, then retry.'
+        status = 'error'
+        socket.close()
+      }, 20000)
+      socket.onclose = () => {
+        if (ws !== socket) return
+        clearTimeout(timer)
+        error ||= 'Terminal disconnected. Check that its machine is connected, then retry.'
+        status = 'closed'
+      }
+      socket.onerror = () => {
+        if (ws !== socket) return
+        clearTimeout(timer)
+        error ||= 'Could not connect to the terminal. Check your connection and the machine status, then retry.'
+        status = 'error'
+      }
+      socket.onmessage = (ev) => {
+        if (ws !== socket) return
+        if (ev.data instanceof ArrayBuffer) {
+          clearTimeout(timer)
+          status = 'live'
+          error = ''
+          term!.write(new Uint8Array(ev.data))
+        } else {
+          try {
+            const m = JSON.parse(ev.data)
+            if (m.type === 'error') {
+              clearTimeout(timer)
+              error = m.message
+              status = 'error'
+            }
+          } catch {
+            term!.write(ev.data)
+          }
         }
       }
     }
+    reconnect()
     term.onData((d) => {
       if (control && ws?.readyState === 1) ws.send(new TextEncoder().encode(d))
     })
@@ -59,7 +97,10 @@
     ro.observe(host!)
     return () => {
       ro.disconnect()
-      ws?.close()
+      clearTimeout(timer)
+      const socket = ws
+      ws = null
+      socket?.close()
       term?.dispose()
     }
   })
@@ -72,6 +113,11 @@
   <button class:primary={control} onclick={toggle}>{control ? 'Typing goes to the terminal' : 'Take control'}</button>
 </div>
 <LoginHelper paneKey={key} />
+{#if error}
+  <div class="connection" role="alert"><span>{error}</span><button onclick={reconnect}>Retry terminal</button></div>
+{:else if status === 'connecting'}
+  <div class="connection" role="status">Connecting to the terminal on {session?.machine ?? key.split(':')[0]}…</div>
+{/if}
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="term" bind:this={host} onclick={() => term?.focus()}></div>
 <p class="small muted hint">tmux {(session?.extra as any)?.tmux?.target ?? key.split(':').slice(3).join(':')} on {session?.machine ?? key.split(':')[0]}. {control ? 'Click into the terminal and type.' : 'Watching only: "Take control" to type.'} To select text for copying, hold Shift while dragging.</p>
@@ -80,6 +126,7 @@
   .thead { display: flex; gap: 12px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--hairline); background: var(--surface); position: sticky; top: var(--sticky-top, 48px); z-index: 3; }
   .name { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .term { height: calc(100vh - 48px - 46px - 40px - 56px); min-height: 280px; background: #141a21; padding: 4px; }
+  .connection { display: flex; align-items: center; gap: 16px; padding: 16px; background: var(--surface); border-bottom: 1px solid var(--hairline); }
   .hint { padding: 6px 16px; margin: 0; }
   @media (min-width: 960px) { .thead { top: 0; } }
 </style>

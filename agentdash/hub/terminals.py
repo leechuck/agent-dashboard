@@ -60,10 +60,15 @@ async def browser_terminal(ws: WebSocket, session_key: str) -> None:
         # "<machine>:tmux:<tmux server name>:<target>"
         tmux = {"socket": parts[2], "target": parts[3]}
     link = state.node_for(session_key)
+    await ws.accept()
     if not tmux or not link:
+        message = (
+            f"Machine {parts[0]} is offline. Reconnect it, then retry the terminal."
+            if not link else "This session has no terminal to attach to."
+        )
+        await ws.send_json({"type": "error", "message": message})
         await ws.close(code=4404)
         return
-    await ws.accept()
     term_id = uuid.uuid4().hex[:12]
     pair = Pair(term_id=term_id, browser=ws)
     PAIRS[term_id] = pair
@@ -100,6 +105,10 @@ async def browser_terminal(ws: WebSocket, session_key: str) -> None:
         log.exception("browser terminal")
     finally:
         PAIRS.pop(term_id, None)
+        try:
+            await ws.close()
+        except Exception:  # noqa: BLE001
+            pass
         if pair.node:
             try:
                 await pair.node.close()
