@@ -697,6 +697,11 @@ class PAAskBody(BaseModel):
     member: str = ""
 
 
+@router.get("/pa/group")
+async def pa_group(request: Request):
+    return await _pa(request, {"op": "group"}, timeout=60)
+
+
 @router.post("/pa/ask")
 async def pa_ask(body: PAAskBody, request: Request):
     return await _pa(request, {**body.model_dump(), "op": "ask"}, timeout=240)

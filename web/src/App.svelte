@@ -14,6 +14,7 @@
   const terminalView = () => import('./components/Terminal.svelte')
   import Overview from './components/Overview.svelte'
   import Personal from './components/Personal.svelte'
+  import Group from './components/Group.svelte'
 
   let route = $state(parse(location.hash))
 
@@ -22,6 +23,7 @@
     if (h.startsWith('new')) return { page: 'new', q: new URLSearchParams(h.split('?')[1] ?? '') }
     if (h === 'login') return { page: 'login' }
     if (h === 'settings') return { page: 'settings' }
+    if (h === 'group') return { page: 'group' }
     if (h === 'limits') return { page: 'limits' }
     if (h === 'overview' || h === 'cockpit') return { page: 'overview' }
     if (h === 'personal' || h.startsWith('personal/')) return { page: 'personal', tab: h.split('/')[1] || 'briefing' }
@@ -76,6 +78,8 @@
           <Settings />
         {:else if route.page === 'history'}
           <History id={route.key} />
+        {:else if route.page === 'group'}
+          <Group />
         {:else if route.page === 'limits'}
           <Limits />
         {:else if route.page === 'terminal' && route.key}
@@ -96,6 +100,8 @@
       <Settings />
     {:else if route.page === 'history'}
       <History id={route.key} />
+    {:else if route.page === 'group'}
+      <Group />
     {:else if route.page === 'limits'}
       <Limits />
     {:else if route.page === 'terminal' && route.key}

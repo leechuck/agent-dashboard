@@ -2,7 +2,7 @@
   import { fleet } from '../lib/store.svelte'
   const pending = $derived(fleet.pendingDecisions.length)
   const waiting = $derived(fleet.waiting.length)
-  const worst = $derived(fleet.worstUsage)
+  import LimitSummary from './LimitSummary.svelte'
   const needs = $derived(fleet.cockpit?.findings.filter((f) => f.severity === 'act').length ?? 0)
 </script>
 
@@ -12,8 +12,9 @@
   <nav>
     <a href="#/overview" class:hot={needs > 0}>Overview{needs > 0 ? ` ${needs}` : ''}</a>
     <a href="#/personal">Personal</a>
+    <a href="#/group">Group</a>
     <a href="#/decisions" class:hot={pending > 0}>Decisions{pending > 0 ? ` ${pending}` : ''}</a>
-    <a href="#/limits" class:warn={!!worst && worst.used_pct >= 80} title={worst ? `${worst.provider} ${worst.label}` : ''}>Limits{worst ? ` ${worst.used_pct.toFixed(0)}%` : ''}</a>
+    <LimitSummary />
     <a href="#/history">History</a>
     <a href="#/settings" title="Settings" aria-label="Settings">⚙</a>
   </nav>

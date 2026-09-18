@@ -351,3 +351,19 @@ export interface WeeklyReports {
     followups?: { message_id: string; date: string; body: string; attachments: { file: string; text: string }[] }[]
   }[]
 }
+
+export interface GroupReview {
+  state: 'on_track' | 'attention' | 'unknown'
+  reason: string
+  evidence: string[]
+  reviewed_at: string
+}
+export interface GroupRoster {
+  ok: boolean
+  error?: string
+  members: {
+    slug: string; name: string; role: string; state: GroupReview['state']
+    review: GroupReview | null; stale: boolean; has_notes: boolean; org_source: string
+    latest_report: {week: string; status: string; checked_at?: string} | null
+  }[]
+}

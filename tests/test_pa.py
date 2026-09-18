@@ -241,3 +241,24 @@ async def test_unavailable_question_endpoint_does_not_fall_back(pa, monkeypatch)
         "agent": {"backend": "endpoint", "endpoint": "removed"}, "endpoints": [],
     }, {})
     assert result == {"ok": False, "error": "The selected personal-assistant endpoint is unavailable"}
+
+
+async def test_group_review_uses_private_sources_and_saves_validated_result(pa, monkeypatch):
+    context = {'org_notes': '* Outcome <2026-09-18 Fri>\nComplete.', 'reports': []}
+    monkeypatch.setattr('agentdash.node.pa.group.roster', lambda *a: [{'slug': 'alice'}])
+    monkeypatch.setattr('agentdash.node.pa.group.evidence', lambda *a: context)
+
+    async def answer(settings, system, digest, agent, endpoints):
+        assert digest['sources'] == context
+        assert 'receipt' in system and 'ONLY JSON' in system
+        return {'ok': True, 'text': json.dumps({'state': 'on_track', 'reason': 'Complete.',
+                                               'evidence': ['* Outcome <2026-09-18 Fri>']})}
+
+    monkeypatch.setattr('agentdash.node.pa.model_briefing.brief', answer)
+    result = await pa.handle({'op': 'ask', 'topic': 'group', 'member': 'alice',
+                              'question': 'Assess progress'}, {})
+    assert result['ok'] and result['review']['state'] == 'on_track'
+    assert (pa.dir / 'data/group_reviews/alice.json').is_file()
+    invalid = await pa.handle({'op': 'ask', 'topic': 'group', 'member': '../secret',
+                               'question': 'Assess progress'}, {})
+    assert not invalid['ok']
