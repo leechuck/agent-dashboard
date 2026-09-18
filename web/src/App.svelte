@@ -45,8 +45,6 @@
   }
 
   onMount(() => {
-    const t = localStorage.getItem('theme')
-    if (t && t !== 'auto') document.documentElement.dataset.theme = t
     const onHash = () => (route = parse(location.hash))
     window.addEventListener('hashchange', onHash)
     fleet.load()

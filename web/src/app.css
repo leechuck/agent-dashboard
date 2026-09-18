@@ -18,10 +18,23 @@
   --sans: 'IBM Plex Sans Variable', system-ui, sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   --radius: 6px;
-  color-scheme: light dark;
+  --on-accent: #ffffff;
+  --terminal-bg: #ffffff;
+  --terminal-fg: #1a222b;
+  --terminal-selection: #cbd9f6;
+  --code-bg: #edf0f3;
+  --code-fg: #1a222b;
+  color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --on-accent: #141a21;
+    --terminal-bg: #141a21;
+    --terminal-fg: #e7ecf1;
+    --terminal-selection: #334f79;
+    --code-bg: #161b22;
+    --code-fg: #e6edf3;
     --page: #141a21;
     --surface: #1b232c;
     --ink: #e7ecf1;
@@ -37,6 +50,13 @@
   }
 }
 :root[data-theme='dark'] {
+  color-scheme: dark;
+  --on-accent: #141a21;
+  --terminal-bg: #141a21;
+  --terminal-fg: #e7ecf1;
+  --terminal-selection: #334f79;
+  --code-bg: #161b22;
+  --code-fg: #e6edf3;
   --page: #141a21;
   --surface: #1b232c;
   --ink: #e7ecf1;
@@ -49,6 +69,29 @@
   --moss: #6cc391;
   --amber: #e0b14c;
   --amber-soft: #3d3218;
+}
+
+:root[data-theme='terminator'] {
+  color-scheme: dark;
+  --page: #000000;
+  --surface: #050a05;
+  --ink: #00ff00;
+  --muted: #80b880;
+  --hairline: #214521;
+  --cobalt: #00ff00;
+  --cobalt-soft: #082808;
+  --signal: #ff8b75;
+  --signal-soft: #321611;
+  --moss: #00ff00;
+  --amber: #e8c866;
+  --amber-soft: #2b230b;
+  --on-accent: #000000;
+  --terminal-bg: #000000;
+  --terminal-fg: #00ff00;
+  --terminal-selection: #165216;
+  --code-bg: #000000;
+  --code-fg: #00ff00;
+  --mono: 'Noto Sans Mono', 'IBM Plex Mono', ui-monospace, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -72,7 +115,7 @@ button {
   cursor: pointer;
 }
 button:hover { border-color: var(--muted); }
-button.primary { background: var(--cobalt); border-color: var(--cobalt); color: #fff; }
+button.primary { background: var(--cobalt); border-color: var(--cobalt); color: var(--on-accent); }
 button.primary:hover { filter: brightness(1.08); }
 button.danger { color: var(--signal); border-color: var(--signal); }
 button:disabled { opacity: .5; cursor: default; }

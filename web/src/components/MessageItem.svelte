@@ -113,7 +113,7 @@
   .md :global(li.task) { list-style: none; margin-left: -18px; }
   .md :global(.box) { color: var(--cobalt); }
   .md :global(code) { font-family: var(--mono); font-size: 13px; padding: 1px 5px; border-radius: 4px; background: var(--cobalt-soft); color: var(--cobalt); }
-  .md :global(pre.code) { margin: 6px 0 10px; padding: 10px 12px; background: #161b22; color: #e6edf3; border-radius: var(--radius); overflow-x: auto; font-size: 12.5px; line-height: 1.5; }
+  .md :global(pre.code) { margin: 6px 0 10px; padding: 10px 12px; background: var(--code-bg); color: var(--code-fg); border-radius: var(--radius); overflow-x: auto; font-size: 12.5px; line-height: 1.5; }
   .md :global(pre.code code) { padding: 0; background: none; color: inherit; font-size: inherit; }
   .md :global(a) { color: var(--cobalt); text-decoration: underline; text-underline-offset: 2px; }
   .md :global(strong) { font-weight: 600; }
@@ -133,9 +133,9 @@
   .result .tline { padding-left: 14px; }
   .lines { flex: none; color: var(--muted); opacity: .7; font-size: 12px; }
   .error .tsum, .error .mark { color: var(--signal); }
-  .detail { margin: 2px 0 8px 24px; padding: 8px 10px; background: #161b22; color: #e6edf3; border-radius: var(--radius); max-height: 50vh; overflow: auto; font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .detail { margin: 2px 0 8px 24px; padding: 8px 10px; background: var(--code-bg); color: var(--code-fg); border-radius: var(--radius); max-height: 50vh; overflow: auto; font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
   .error .detail { border-left: 3px solid var(--signal); }
-  .md :global(pre.diff .add), .detail :global(.add) { display: inline-block; width: 100%; background: rgb(46 160 67 / .22); color: #aff5b4; }
-  .md :global(pre.diff .del), .detail :global(.del) { display: inline-block; width: 100%; background: rgb(248 81 73 / .2); color: #ffc1ba; }
-  .md :global(pre.diff .hunk) { color: #79c0ff; }
+  .md :global(pre.diff .add), .detail :global(.add) { display: inline-block; width: 100%; background: rgb(46 160 67 / .22); color: var(--moss); }
+  .md :global(pre.diff .del), .detail :global(.del) { display: inline-block; width: 100%; background: rgb(248 81 73 / .2); color: var(--signal); }
+  .md :global(pre.diff .hunk) { color: var(--cobalt); }
 </style>

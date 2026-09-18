@@ -1,6 +1,12 @@
 import { mount } from 'svelte'
 import './app.css'
 import App from './App.svelte'
+import { applyTheme, readTheme } from './lib/theme'
+
+applyTheme(readTheme(), false)
+window.addEventListener('storage', (event) => {
+  if (event.key === 'theme' || event.key === null) applyTheme(readTheme(), false)
+})
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {})

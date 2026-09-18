@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { themes, readTheme, applyTheme } from '../lib/theme'
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
   import { currentSubscription, disablePush, enablePush, pushSupported } from '../lib/push'
@@ -123,7 +124,7 @@
     }
   }
   let msg = $state('')
-  const theme = $state({ value: localStorage.getItem('theme') ?? 'auto' })
+  const theme = $state({ value: readTheme() })
 
   onMount(async () => {
     loadAgents()
@@ -152,9 +153,7 @@
 
   function setTheme(v: string) {
     theme.value = v
-    localStorage.setItem('theme', v)
-    if (v === 'auto') delete document.documentElement.dataset.theme
-    else document.documentElement.dataset.theme = v
+    applyTheme(v)
   }
 </script>
 
@@ -174,11 +173,11 @@
   {/if}
   {#if msg}<p class="small">{msg}</p>{/if}
 
-  <div class="row">
-    <div class="lead">Theme</div>
+  <div class="row appearance">
+    <div><div class="lead">Colour scheme</div><div class="small muted">Applies to the dashboard, code and terminal. Saved on this device.</div></div>
     <div class="seg">
-      {#each ['auto', 'light', 'dark'] as v}
-        <button class:primary={theme.value === v} onclick={() => setTheme(v)}>{v}</button>
+      {#each themes as t}
+        <button class:primary={theme.value === t.id} aria-pressed={theme.value === t.id} title={t.description} onclick={() => setTheme(t.id)}>{t.label}</button>
       {/each}
     </div>
   </div>
@@ -381,6 +380,7 @@
   h1 { font-size: 22px; margin: 16px 16px 8px; }
   .row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 16px; border-bottom: 1px solid var(--hairline); }
   .lead { font-weight: 500; }
-  .seg { display: flex; gap: 6px; }
+  .appearance { flex-wrap: wrap; }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; }
   p { padding: 0 16px; }
 </style>

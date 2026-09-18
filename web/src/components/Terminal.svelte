@@ -3,6 +3,7 @@
   import { Terminal } from '@xterm/xterm'
   import { FitAddon } from '@xterm/addon-fit'
   import '@xterm/xterm/css/xterm.css'
+  import { terminalAppearance } from '../lib/theme'
   import { fleet } from '../lib/store.svelte'
   import LoginHelper from './LoginHelper.svelte'
 
@@ -17,15 +18,14 @@
   }
   let status = $state('connecting')
   let error = $state('')
-  let reconnect = () => {}
+  let reconnect = $state(() => {})
   let ws: WebSocket | null = null
   let term: Terminal | null = null
 
   onMount(() => {
     term = new Terminal({
-      fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
+      ...terminalAppearance(),
       fontSize: 13,
-      theme: { background: '#141a21', foreground: '#e7ecf1' },
       cursorBlink: true,
       scrollback: 5000,
     })
@@ -34,6 +34,13 @@
     term.open(host!)
     fit.fit()
     if (control) term.focus()
+    const updateTheme = () => {
+      if (term) { const appearance = terminalAppearance(); term.options.theme = appearance.theme; term.options.fontFamily = appearance.fontFamily; fit.fit() }
+    }
+    const themeObserver = new MutationObserver(updateTheme)
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    const systemTheme = matchMedia('(prefers-color-scheme: dark)')
+    systemTheme.addEventListener('change', updateTheme)
     let timer: ReturnType<typeof setTimeout>
     reconnect = () => {
       const previous = ws
@@ -97,6 +104,8 @@
     ro.observe(host!)
     return () => {
       ro.disconnect()
+      themeObserver.disconnect()
+      systemTheme.removeEventListener('change', updateTheme)
       clearTimeout(timer)
       const socket = ws
       ws = null
@@ -125,7 +134,7 @@
 <style>
   .thead { display: flex; gap: 12px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--hairline); background: var(--surface); position: sticky; top: var(--sticky-top, 48px); z-index: 3; }
   .name { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .term { height: calc(100vh - 48px - 46px - 40px - 56px); min-height: 280px; background: #141a21; padding: 4px; }
+  .term { height: calc(100vh - 48px - 46px - 40px - 56px); min-height: 280px; background: var(--terminal-bg); padding: 4px; }
   .connection { display: flex; align-items: center; gap: 16px; padding: 16px; background: var(--surface); border-bottom: 1px solid var(--hairline); }
   .hint { padding: 6px 16px; margin: 0; }
   @media (min-width: 960px) { .thead { top: 0; } }
