@@ -420,7 +420,10 @@ class PersonalAssistant:
                 "interpreting old plans or improvement plans; historical concern alone does "
                 "not establish a current problem. A report receipt or missing report alone "
                 "does not establish research progress. Use unknown when current evidence is "
-                "insufficient, contradictory or too old. Missing evidence is not a negative "
+                "insufficient, contradictory or too old. Recent scheduling/contact notes that "
+                "repeat old research history do not establish current research progress. "
+                "Use unknown, not watch, when no recent substantive work can be assessed. "
+                "Missing evidence is not a negative "
                 "performance judgment. Assess independently, with no target distribution. "
                 "Be concise, plain text, no paragraphs disguised as list points."
             )
