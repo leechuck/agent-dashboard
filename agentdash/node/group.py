@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -96,7 +97,11 @@ def show(pa: Path, org: Path) -> dict:
                 "stale": stale,
                 "has_notes": bool(context["org_notes"]),
                 "org_source": context["org_source"],
-                "latest_report": context["reports"][-1] if context["reports"] else None,
+                "latest_report": {
+                    k: context["reports"][-1].get(k) for k in ("week", "status", "checked_at")
+                }
+                if context["reports"]
+                else None,
             }
         )
     return {"ok": True, "members": rows}
@@ -105,6 +110,8 @@ def show(pa: Path, org: Path) -> dict:
 def save(pa: Path, slug: str, text: str, context: dict) -> dict:
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
     review = json.loads(text)
+    if not isinstance(review, dict):
+        raise ValueError("Review must be a JSON object")
     if review.get("state") not in STATES or not isinstance(review.get("reason"), str):
         raise ValueError("Model returned an invalid progress review")
     if not isinstance(review.get("evidence"), list) or not all(
@@ -121,8 +128,6 @@ def save(pa: Path, slug: str, text: str, context: dict) -> dict:
     file = review_path(pa, slug)
     file.parent.mkdir(parents=True, exist_ok=True)
     # Atomic replace; concurrent requests never expose a partial assessment.
-    import tempfile
-
     with tempfile.NamedTemporaryFile(mode="w", dir=file.parent, delete=False) as f:
         json.dump(review, f)
         temp = Path(f.name)

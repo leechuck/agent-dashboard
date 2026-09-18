@@ -38,7 +38,7 @@
 </script>
 <section>
   <h2>Group</h2>
-  <p class="muted">Research and work progress from weekly reports and org notes. Each assessment includes its evidence; report receipt is shown separately.</p>
+  <p class="muted">Model assessments of research and work progress from weekly reports and org notes. Each includes its evidence; report receipt is shown separately.</p>
   <div class="controls">
     <button disabled={loading || !!busy || all} onclick={load}>{loading ? 'Loading…' : 'Reload roster'}</button>
     <button disabled={!data || !!busy || all} onclick={reviewAll}>Review everyone</button>
