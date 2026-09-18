@@ -251,8 +251,8 @@ async def test_group_review_uses_private_sources_and_saves_validated_result(pa, 
     async def answer(settings, system, digest, agent, endpoints):
         assert digest['sources'] == context
         assert 'receipt' in system and 'ONLY JSON' in system
-        return {'ok': True, 'text': json.dumps({'state': 'on_track', 'reason': 'Complete.',
-                                               'evidence': ['* Outcome <2026-09-18 Fri>']})}
+        return {'ok': True, 'text': json.dumps({'state': 'on_track', 'reason': 'Complete.', 'progress': ['Complete'], 'risks': [],
+                                               'next_step': 'Continue', 'intervention': '', 'evidence': ['* Outcome <2026-09-18 Fri>']})}
 
     monkeypatch.setattr('agentdash.node.pa.model_briefing.brief', answer)
     result = await pa.handle({'op': 'ask', 'topic': 'group', 'member': 'alice',

@@ -11,7 +11,8 @@ from pathlib import Path
 
 import yaml
 
-STATES = {"on_track", "attention", "unknown"}
+REVIEW_VERSION = 2
+STATES = {"on_track", "watch", "attention", "unknown"}
 
 
 def roster(pa: Path, org: Path) -> list[dict]:
@@ -83,7 +84,8 @@ def show(pa: Path, org: Path) -> dict:
         stale = bool(
             review
             and (
-                review.get("fingerprint") != fingerprint(context)
+                review.get("version") != REVIEW_VERSION
+                or review.get("fingerprint") != fingerprint(context)
                 or (datetime.now(UTC) - datetime.fromisoformat(review["reviewed_at"])).days >= 14
             )
         )
@@ -114,6 +116,22 @@ def save(pa: Path, slug: str, text: str, context: dict) -> dict:
         raise ValueError("Review must be a JSON object")
     if review.get("state") not in STATES or not isinstance(review.get("reason"), str):
         raise ValueError("Model returned an invalid progress review")
+    for field, limit in (("reason", 180), ("next_step", 200), ("intervention", 200)):
+        value = review.get(field)
+        if not isinstance(value, str) or len(value) > limit:
+            raise ValueError(f"Review {field} must be at most {limit} characters")
+    if not review["reason"].strip() or not review["next_step"].strip():
+        raise ValueError("Review needs a summary and next step")
+    for field in ("progress", "risks"):
+        value = review.get(field)
+        if (
+            not isinstance(value, list)
+            or len(value) > 3
+            or not all(isinstance(item, str) and 0 < len(item.strip()) <= 180 for item in value)
+        ):
+            raise ValueError(f"Review {field} must contain at most three short points")
+    if review["state"] == "attention" and not review["intervention"].strip():
+        raise ValueError("Needs attention requires a concrete intervention for Robert")
     if not isinstance(review.get("evidence"), list) or not all(
         isinstance(x, str) for x in review["evidence"]
     ):
@@ -123,8 +141,15 @@ def save(pa: Path, slug: str, text: str, context: dict) -> dict:
     sources = context["org_notes"] + json.dumps(context["reports"], ensure_ascii=False)
     if any(not ref.strip() or ref not in sources for ref in review["evidence"]):
         raise ValueError("Review contains an unrecognized evidence reference")
-    review = {k: review[k] for k in ("state", "reason", "evidence")}
-    review.update(reviewed_at=datetime.now(UTC).isoformat(), fingerprint=fingerprint(context))
+    review = {
+        k: review[k]
+        for k in ("state", "reason", "evidence", "progress", "risks", "next_step", "intervention")
+    }
+    review.update(
+        version=REVIEW_VERSION,
+        reviewed_at=datetime.now(UTC).isoformat(),
+        fingerprint=fingerprint(context),
+    )
     file = review_path(pa, slug)
     file.parent.mkdir(parents=True, exist_ok=True)
     # Atomic replace; concurrent requests never expose a partial assessment.

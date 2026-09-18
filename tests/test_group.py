@@ -36,6 +36,10 @@ def test_review_is_invalidated_by_new_evidence_and_age(sources):
         {
             "state": "on_track",
             "reason": "Milestone complete",
+            "progress": ["Milestone complete"],
+            "risks": [],
+            "next_step": "Continue",
+            "intervention": "",
             "evidence": ["* Outcome <2026-09-18 Fri>"],
         }
     )
@@ -56,7 +60,17 @@ def test_unsubstantiated_review_does_not_replace_existing(sources):
     group.save(
         pa,
         "alice",
-        json.dumps({"state": "unknown", "reason": "Not enough evidence", "evidence": []}),
+        json.dumps(
+            {
+                "state": "unknown",
+                "reason": "Not enough evidence",
+                "evidence": [],
+                "progress": [],
+                "risks": [],
+                "next_step": "Obtain an update",
+                "intervention": "",
+            }
+        ),
         context,
     )
     for refs in [[], ["invented reference"]]:
@@ -64,7 +78,59 @@ def test_unsubstantiated_review_does_not_replace_existing(sources):
             group.save(
                 pa,
                 "alice",
-                json.dumps({"state": "attention", "reason": "Blocked", "evidence": refs}),
+                json.dumps(
+                    {
+                        "state": "attention",
+                        "reason": "Blocked",
+                        "evidence": refs,
+                        "progress": [],
+                        "risks": ["Blocked"],
+                        "next_step": "Decide",
+                        "intervention": "Approve access",
+                    }
+                ),
                 context,
             )
     assert group.show(pa, org)["members"][0]["review"]["state"] == "unknown"
+
+
+def test_attention_requires_intervention_and_summaries_stay_short(sources):
+    pa, org = sources
+    context = group.evidence(pa, org, group.roster(pa, org)[0])
+    review = {
+        "state": "watch",
+        "reason": "A routine risk",
+        "evidence": ["* Outcome <2026-09-18 Fri>"],
+        "progress": ["Milestone complete"],
+        "risks": ["Confirm next milestone"],
+        "next_step": "Mentor to check next week",
+        "intervention": "",
+    }
+    group.save(pa, "alice", json.dumps(review), context)
+    assert group.show(pa, org)["members"][0]["state"] == "watch"
+    with pytest.raises(ValueError, match="intervention"):
+        group.save(pa, "alice", json.dumps({**review, "state": "attention"}), context)
+    with pytest.raises(ValueError, match="180"):
+        group.save(pa, "alice", json.dumps({**review, "reason": "x" * 181}), context)
+    with pytest.raises(ValueError, match="three"):
+        group.save(pa, "alice", json.dumps({**review, "risks": ["Risk"] * 4}), context)
+
+
+def test_old_rubric_is_marked_for_review(sources):
+    pa, org = sources
+    context = group.evidence(pa, org, group.roster(pa, org)[0])
+    file = group.review_path(pa, "alice")
+    file.parent.mkdir(parents=True)
+    file.write_text(
+        json.dumps(
+            {
+                "state": "attention",
+                "reason": "Old assessment",
+                "reviewed_at": datetime.now(UTC).isoformat(),
+                "fingerprint": group.fingerprint(context),
+            }
+        )
+    )
+    row = group.show(pa, org)["members"][0]
+    assert row["stale"] and row["state"] == "unknown"
+    assert row["review"]["reason"] == "Old assessment"

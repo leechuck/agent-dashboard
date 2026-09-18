@@ -353,7 +353,12 @@ export interface WeeklyReports {
 }
 
 export interface GroupReview {
-  state: 'on_track' | 'attention' | 'unknown'
+  version?: number
+  progress?: string[]
+  risks?: string[]
+  next_step?: string
+  intervention?: string
+  state: 'on_track' | 'watch' | 'attention' | 'unknown'
   reason: string
   evidence: string[]
   reviewed_at: string
