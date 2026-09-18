@@ -52,7 +52,8 @@
       for (const a of accounts) {
         const ws = windows.filter((w) => w.provider === p && w.account === a)
         const configured = p === 'anthropic' ? logins.filter(l => l.account === a) : []
-        const login = configured.find(l => l.logged_in) ?? configured[0]
+        const rejected = configured.find(l => l.expired)
+        const login = (!ws.length && rejected) || configured.find(l => l.logged_in) || configured[0]
         out.push({
           provider: p,
           account: a,
@@ -61,7 +62,7 @@
           machine: ws[0]?.machine ?? login?.machine ?? '',
           login: login?.name,
           loginMachine: login?.machine,
-          expired: !!configured.length && configured.every(l => l.expired),
+          expired: !!login?.expired && (!ws.length || configured.every(l => l.expired)),
           session: ws.find((w) => kindOf(w) === 'session'),
           week: ws.find((w) => kindOf(w) === 'week'),
           scoped: [...ws.filter((w) => kindOf(w) === 'scoped')].sort((a, b) => b.used_pct - a.used_pct),
