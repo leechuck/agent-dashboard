@@ -40,11 +40,11 @@
 </script>
 
 {#if m.kind === 'text' && m.role === 'user'}
-  <div class="msg user" class:meta={m.is_meta} class:sent={!!m.sender}>
+  <div class="msg user" class:meta={m.is_meta} class:sent={!!m.sender} class:pending={m.pending}>
     <span class="mark">{m.sender ? '⤷' : '❯'}</span>
     <div class="body">
       <pre class="plain">{m.text}</pre>
-      <span class="when">{#if m.sender}<span class="via">{m.sender === 'dashboard' ? 'you, from the dashboard' : `from ${m.sender}`}</span> · {/if}{clock(m.ts)}</span>
+      <span class="when">{#if m.pending}<span class="via queued">queued · the agent has not read it yet (it is busy or a dialog is open)</span> · {:else if m.sender}<span class="via">{m.sender === 'dashboard' ? 'you, from the dashboard' : `from ${m.sender}`}</span> · {/if}{clock(m.ts)}</span>
     </div>
   </div>
 {:else if m.kind === 'text'}
@@ -101,6 +101,8 @@
   .msg.user { margin: 10px 0 6px; padding-top: 9px; padding-bottom: 9px; background: var(--cobalt-soft); border-left: 3px solid var(--cobalt); }
   .msg.user .mark { color: var(--cobalt); font-weight: 600; }
   .msg.user.sent { border-left-style: dashed; }
+  .msg.user.pending { opacity: .75; }
+  .via.queued { color: var(--signal); }
   .via { color: var(--cobalt); font-weight: 600; }
   .msg.agent .mark { color: var(--ink); }
   .msg.agent.sub .mark { color: var(--amber); }

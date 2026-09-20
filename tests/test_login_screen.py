@@ -63,3 +63,61 @@ def test_trust_options_preserve_the_actual_selected_choice():
     options = login_screen.read(screen)["options"]
     assert options[0] == {"n": 1, "label": "No, exit", "chosen": True}
     assert options[1] == {"n": 2, "label": "Yes, I trust this folder", "chosen": False}
+
+
+PAUSED = """
+● Bash(cd /mnt/data1/DogoHLA; git log --oneline)
+  ⎿  Error: Not run: the response that made this tool call was stopped by a safety classifier.
+● Fable 5.1's safeguards stopped the response above · continuing once with that noted
+────────────────────────────────────────────────────────────
+ Session paused
+  Fable 5.1's safeguards flagged this message. Our intentionally broad safeguards allow us to
+  tasks. Send feedback with /feedback or learn more
+  Details: `[bio]`
+  ❯ 1. Switch to Opus 5
+    2. Edit prompt and retry with Fable 5.1
+✻ Waiting for API response · will retry in 2m 40s · check your network
+"""
+
+MODEL_SWITCH = """
+────────────────────────────────────────────────────────────
+ ☐ Model switch
+│ Fable 5.1's safeguards flagged this message. Switch to Opus 5 and keep going whenever this happens?
+❯ 1. Switch automatically
+     Continue on Opus 5 now, and switch without asking from now on
+  2. Stay on Fable 5.1
+     Stop here without switching, and ask me each time a message is flagged
+  3. Type something.
+────────────────────────────────────────────────────────────
+  4. Chat about this
+Enter to select · ↑/↓ to navigate · Esc to cancel
+"""
+
+REPLY_WITH_LIST = """
+● Three options:
+  1. Keep the symlink check
+  2. Resolve the path first
+  3. Drop the check
+────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────
+"""
+
+
+def test_a_paused_session_dialog_becomes_a_choice():
+    r = login_screen.read(PAUSED)
+    assert r["stage"] == "choice" and r["title"] == "Session paused"
+    assert "flagged this message" in r["question"] and "[bio]" in r["question"]
+    assert [(o["n"], o["chosen"]) for o in r["options"]] == [(1, True), (2, False)]
+    assert r["options"][0]["label"] == "Switch to Opus 5"
+
+
+def test_a_model_switch_dialog_becomes_a_choice():
+    r = login_screen.read(MODEL_SWITCH)
+    assert r["stage"] == "choice" and r["title"] == "Model switch"
+    assert [o["n"] for o in r["options"]] == [1, 2, 3, 4]
+    assert r["options"][1]["label"] == "Stay on Fable 5.1"
+
+
+def test_a_numbered_list_in_a_reply_is_not_a_dialog():
+    assert login_screen.read(REPLY_WITH_LIST)["stage"] == "other"

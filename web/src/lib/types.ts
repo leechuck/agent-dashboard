@@ -72,6 +72,8 @@ export interface Message {
   sender?: string
   /** long tool input or output was cut for the list; the full message is fetched on open */
   slim?: boolean
+  /** sent from the dashboard into the agent's inbox; it has not read it yet */
+  pending?: boolean
 }
 
 export interface BusEvent {

@@ -2,10 +2,11 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api'
 
-  // Claude's login in a pane, as buttons, a link and a box for the code: the terminal
-  // is hard to use for this (a long address to copy, a code to paste, a phone keyboard).
+  // What Claude asks in a pane (a login, a trust question, a paused session, a model
+  // switch), as buttons, a link and a box for the code: the terminal is hard to use for
+  // this (a long address to copy, a code to paste, a phone keyboard).
   let { paneKey }: { paneKey: string } = $props()
-  type Screen = { stage: string; url?: string; options?: { n: number; label: string; chosen: boolean }[]; continue?: boolean }
+  type Screen = { stage: string; url?: string; options?: { n: number; label: string; chosen: boolean }[]; continue?: boolean; title?: string; question?: string }
   let screen = $state<Screen | null>(null)
   let code = $state('')
   let busy = $state(false)
@@ -88,6 +89,12 @@
         <button disabled={busy} onclick={() => choose(o.n, screen!.options ?? [])}>{o.label}</button>
       {/each}
       {#if !screen.options?.length}<span class="small">Choose an option in the terminal below.</span>{/if}
+    {:else if screen.stage === 'choice'}
+      <div class="login-title">{screen.title}</div>
+      {#if screen.question}<p class="question small">{screen.question}</p>{/if}
+      {#each screen.options ?? [] as o (o.n)}
+        <button class:primary={o.chosen} disabled={busy} onclick={() => choose(o.n, screen!.options ?? [])}>{o.label}</button>
+      {/each}
     {:else if screen.stage === 'done'}
       <span class="ok">Logged in. Limits shows this plan within a minute.</span>
       {#if screen.continue}<button disabled={busy} onclick={() => press(['Enter'])}>Continue</button>{/if}
@@ -99,6 +106,7 @@
 <style>
   .login-title { width: 100%; font-weight: 700; }
   .login-status { padding: 8px 16px; }
+  .question { width: 100%; margin: 0; }
   .lh { flex: none; display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; padding: 10px 16px; background: var(--cobalt-soft); border-bottom: 1px solid var(--hairline); }
   .step { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
   .step input { flex: 1 1 260px; padding: 6px 8px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--surface); font-family: var(--mono, monospace); }

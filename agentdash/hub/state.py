@@ -138,6 +138,13 @@ class HubState:
         cache = self.caches.setdefault(session_key, deque(maxlen=2000))
         if reset:
             cache.clear()
+        delivered = {
+            m.text.strip() for m in msgs if m.role == "user" and m.sender and not m.pending
+        }
+        if delivered and any(m.pending for m in cache):
+            kept = [m for m in cache if not (m.pending and m.text.strip() in delivered)]
+            cache.clear()
+            cache.extend(kept)
         cache.extend(msgs)
 
     async def request(

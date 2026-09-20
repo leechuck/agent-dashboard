@@ -38,6 +38,7 @@ from ..models import (
     DecisionStatus,
     Frame,
     Harness,
+    Message,
     Session,
     SessionStatus,
     now_ms,
@@ -374,6 +375,21 @@ class Node:
                     sender=f"agentdash@{self.machine}",
                 )
                 result.update(ok=True, reply=reply)
+                # Claude reads its inbox between turns; a dialog or a long turn can hold the
+                # message for a while. Show it now so the board does not look deaf; the real
+                # record replaces it when the transcript has it.
+                queued = Message(
+                    id=f"pending:{request_id or secrets.token_hex(8)}",
+                    ts=now_ms(),
+                    role="user",
+                    kind="text",
+                    text=text,
+                    sender="dashboard",
+                    pending=True,
+                )
+                await self.hub.send(
+                    NODE_MESSAGES, {"session_key": key, "messages": [queued.model_dump()]}
+                )
             except SocketSendError as e:
                 result["error"] = str(e)
         elif sess.harness == "pi" and sess.extra.get("inbox"):

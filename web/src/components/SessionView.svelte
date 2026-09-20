@@ -9,6 +9,7 @@
   import SessionSwitcher from './SessionSwitcher.svelte'
   import SwitchPanel from './SwitchPanel.svelte'
   import MovePanel from './MovePanel.svelte'
+  import LoginHelper from './LoginHelper.svelte'
   import { isQuestionTool } from '../lib/questions'
 
   let { key }: { key: string } = $props()
@@ -206,6 +207,11 @@
     </div>
     </div>
   </div>
+
+  {#if session.status === 'waiting' && x.tmux?.target && session.harness !== 'tmux'}
+    <!-- a dialog in its terminal (paused session, model switch, trust): answer it here -->
+    <LoginHelper paneKey={session.key} />
+  {/if}
 
   <div class="list" bind:this={list} onscroll={onScroll}>
     {#if visible.length === 0}

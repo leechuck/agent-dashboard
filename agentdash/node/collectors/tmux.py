@@ -96,6 +96,8 @@ _QUESTIONS = (
     ("Do you trust", "your OK to work in this folder (open its terminal)"),
     ("trust this folder", "your OK to work in this folder (open its terminal)"),
     ("Select login method", "a login (open its terminal)"),
+    ("Session paused", "a choice in its dialog"),
+    ("Enter to select", "a choice in its dialog"),
 )
 
 
