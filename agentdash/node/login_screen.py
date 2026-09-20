@@ -45,14 +45,15 @@ def _choice(lines: list[str]) -> dict[str, Any] | None:
     low = "\n".join(tail).lower()
     if not any(o["chosen"] for o in options) and not any(h in low for h in _CHOICE_HINTS):
         return None
+    # The dialog's text sits between a rule (or the last piece of output) and the options,
+    # with blank lines between its paragraphs.
     block: list[str] = []
-    for line in reversed(tail[: starts[0]]):
+    for line in reversed(tail[max(0, starts[0] - 14) : starts[0]]):
         text = line.strip().lstrip("│┃|").strip()
-        if not text or _RULE.match(line) or text.startswith(_NOISE):
-            if block:
-                break
-            continue
-        block.append(text)
+        if _RULE.match(line) or text.startswith(_NOISE):
+            break
+        if text:
+            block.append(text)
     block.reverse()
     title = block[0].lstrip("☐☑☒ ").strip() if block else "The agent asks"
     return {

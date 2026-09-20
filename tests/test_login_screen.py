@@ -71,11 +71,15 @@ PAUSED = """
 ● Fable 5.1's safeguards stopped the response above · continuing once with that noted
 ────────────────────────────────────────────────────────────
  Session paused
+
   Fable 5.1's safeguards flagged this message. Our intentionally broad safeguards allow us to
   tasks. Send feedback with /feedback or learn more
+
   Details: `[bio]`
+
   ❯ 1. Switch to Opus 5
     2. Edit prompt and retry with Fable 5.1
+
 ✻ Waiting for API response · will retry in 2m 40s · check your network
 """
 
