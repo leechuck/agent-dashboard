@@ -60,3 +60,115 @@ Facts that shaped the design (verified 2026-09-17):
   pi; Codex keeps its own `cwd` in the rollout and simply runs where it is started.
 - opencode and Hermes sessions are listed by the roster only and cannot move (no
   file-level resume); a handover briefing to another harness remains the way.
+
+## Revision: working-environment transfers (2026-09-19)
+
+The original transcript-only implementation is insufficient for ongoing work. Moves
+now request an environment bundle by default. It includes the project tree (Git data,
+hidden and untracked files, local dependencies), harness working configuration, skills,
+plugins, and Claude project memory. Harness credentials are excluded; the destination
+login is linked into an isolated per-move configuration directory. Shared skills are
+copied into the destination project's `.agents/skills`. Skill/plugin symlinks are
+materialized; project symlinks remain links. Codex resume explicitly selects the new cwd.
+
+The default UI destination is a separate project folder. Existing differing files cause
+an error, not replacement. Destination executable/configuration and archive checks run
+through `session.prepare` before the source is stopped. This is a separate protocol
+operation so an older destination cannot mistake a preflight for a launch. After a
+successful check, stopping moves take a fresh source snapshot, then import and launch.
+Failures after the stop explicitly report that fact; the original files remain resumable.
+This is a restart from persisted conversation state, not a live process migration or
+an atomic transaction across hosts. Another process modifying either tree can still
+cause the final import to fail. Environment data is limited to 32 GiB uncompressed.
+
+Every resumed agent receives a relocation message naming both hosts and directories,
+what was copied, and the need to identify missing folders/services. OS packages, running
+commands, sockets, credentials outside the destination login, and dependencies outside
+the copied roots are not reproduced. Virtualenv shebangs and absolute references may
+need repair after relocation. The agent is explicitly told to check these before work.
+
+Validation: `tests/test_workspace_transfer.py` covers real file bundles and node workflow
+with mocked transport/launch for both harnesses. `tests/test_live_move.py` is an opt-in
+native two-host test. Set `AGENTDASH_LIVE_MOVE_URL`, `AGENTDASH_WEB_TOKEN`,
+`AGENTDASH_LIVE_MOVE_SOURCE`, and `AGENTDASH_LIVE_MOVE_TARGET`, then run:
+
+```
+.venv/bin/pytest -v tests/test_live_move.py
+```
+
+It creates disposable `/tmp/agentdash-move-smoke-*` projects and tests native conversation
+recall, dirty Git state, hidden/untracked files, a local executable dependency and skills.
+It spends model tokens, retains files/transcripts as evidence, and stops only its own test
+sessions. Login/trust/tool-approval dialogs may require interaction in the terminal;
+`AGENTDASH_LIVE_MOVE_PERMISSIONS` explicitly selects the test's permission setting.
+Deploy the updated hub and both nodes before running them.
+
+Transfers use bounded 4 MiB requests with retries and idempotent upload offsets.
+The dashboard receives live stage changes and byte counts over its event stream;
+upload/download bars show progress for that stage, while packing and restore stages
+are indeterminate. Preflight and final snapshots are labelled separately.
+`tests/test_transfer_http.py` verifies byte-for-byte recovery after a lost upload response,
+HTTP range downloads, progress counts, and refusal of mismatched upload offsets.
+
+## Revision: browsing the full archive
+
+History queries now filter every saved Claude, Codex and pi session before applying
+pagination. The running roster retains its own limits. Results include hub-assigned
+titles and request descriptions; optional conversation search scans decoded transcript
+text on each online host and returns an excerpt. It no longer depends on the separate
+agentsview index for search coverage. Hosts report errors separately so a missing node
+cannot silently look like an empty archive. The UI offers host filtering, older pages,
+and explicit “Resume on <host>” actions. Another host opens the environment-transfer
+form with that destination selected. Resuming Claude locally preserves its original
+configuration directory, including isolated moved environments.
+
+Regression tests cover old results beyond the roster limit, renamed titles, Unicode
+conversation content, cross-host pagination and preserving the resume environment.
+A deployed laptop check returned 50 results at offset 500 and local content matches;
+the initial full content search took approximately 31 seconds. Content search remains
+optional because it reads the archives rather than maintaining a second index.
+
+Native Claude validation on lc-dell → ws succeeded after signing into the destination:
+the resumed agent recalled a conversation-only code and verified dirty Git state,
+hidden/untracked files, an executable dependency and a skill. The test exposed missing
+Claude onboarding metadata, an expired destination login, and the need to persist the
+new cwd separately from historical transcript records; these are now handled. The CLI's
+own auth-status check rejects a logged-out destination during preflight. A second resume
+from history verified the isolated configuration and destination cwd were preserved.
+
+The deployed native Codex lc-dell → ws test also passed (898 seconds including both
+full environment snapshots). It verified the original conversation-only code, the new
+cwd, dirty Git state, hidden/untracked files, executable dependency and skill. Both
+native checks used disposable fixtures and stopped their test agents afterward.
+Desktop (1280 px) and mobile (390 px) browser checks passed for transfer progress,
+laptop history pagination/search, explicit resume destination selection, and the
+remote sign-in link opening in the client browser. Final automated suite: 188 passed,
+2 opt-in live cases skipped in that run; frontend check/build succeeded with 14 warnings.
+
+
+Large environments: the original 2 GiB limit rejected the real pangenome project
+during preflight packing, before the source was stopped. The shared archive/relay
+limit is now 32 GiB and each move stage has a two-hour request deadline. Source
+packing, relay upload, destination download, staging and final writes check free
+space, retaining a 512 MiB reserve. Final writes on the same filesystem are summed;
+staging uses filesystem hard links to avoid expanding archived hard links prematurely.
+A regression test packs and restores a real logical file larger than 2 GiB, and a
+relay test uploads/downloads bytes across the 2 GiB offset boundary.
+
+The move form explicitly asks whether to create a missing destination directory,
+checked by default. `create_dir=false` rejects a missing folder during destination
+preflight, before the source is stopped. Existing directories remain subject to the
+same no-overwrite conflict checks; there is no overwrite option. Desktop and mobile
+browser checks verified the default and opt-out request payload.
+
+## Revision: a moved session's directory is the move record's, not the harness store's (2026-09-20)
+
+Codex keeps the source machine's cwd in its thread row and rollout even after
+`codex resume --cd <destination>`; Claude transcripts also record the source cwd. On ws
+the moved pangenome session therefore reported `/home/leechuck/Public/software/pangenome`,
+and switching it to Claude Code failed with `no such directory` although the process ran
+in `/mnt/data1/DogoHLA`. Now every Claude/Codex import writes a move record
+(`agentdash-move.json`, one entry per session, still readable by nodes that know the old
+single-session form), the roster takes a running Codex process's real cwd, and history
+and `session.switch` consult the record for both harnesses. Regression tests:
+`test_moved_codex_history_uses_saved_destination`, `test_moved_codex_hands_over_in_its_new_directory`.

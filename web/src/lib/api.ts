@@ -38,8 +38,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ action }),
     }),
-  startSession: (machine: string, spec: Partial<AgentChoice> & { cwd: string; prompt?: string; name?: string; resume?: string; mode?: string }) =>
-    j<{ ok: boolean; error?: string; job_id?: string; output?: string; attach?: string; tmux?: { name: string } }>(`/api/machines/${encodeURIComponent(machine)}/sessions`, {
+  startSession: (machine: string, spec: Partial<AgentChoice> & { cwd: string; create_dir?: boolean; prompt?: string; name?: string; resume?: string; mode?: string }) =>
+    j<{ ok: boolean; error?: string; warning?: string; job_id?: string; output?: string; attach?: string; tmux?: { name: string } }>(`/api/machines/${encodeURIComponent(machine)}/sessions`, {
       method: 'POST',
       body: JSON.stringify(spec),
     }),
@@ -49,12 +49,12 @@ export const api = {
   openLogin: (machine: string, name: string) =>
     j<{ ok: boolean; error?: string; terminal_key?: string; attach?: string }>(`/api/machines/${encodeURIComponent(machine)}/logins`, { method: 'POST', body: JSON.stringify({ name }) }),
   switchSession: (key: string, body: Partial<AgentChoice> & { note?: string; force?: boolean; stop_old?: boolean; cwd?: string }) =>
-    j<{ ok: boolean; error?: string; resumed?: boolean; attach?: string; terminal_key?: string; session_key?: string }>(`/api/sessions/${encodeURIComponent(key)}/switch`, { method: 'POST', body: JSON.stringify(body) }),
-  past: (params: { machine?: string; harness?: string; q?: string; limit?: number } = {}) =>
-    j<{ sessions: Session[]; errors: Record<string, string> }>(
+    j<{ ok: boolean; error?: string; warning?: string; resumed?: boolean; attach?: string; terminal_key?: string; session_key?: string }>(`/api/sessions/${encodeURIComponent(key)}/switch`, { method: 'POST', body: JSON.stringify(body) }),
+  past: (params: { machine?: string; harness?: string; q?: string; limit?: number; offset?: number; content?: boolean } = {}) =>
+    j<{ sessions: Session[]; errors: Record<string, string>; has_more: boolean }>(
       `/api/past?${new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])))}`,
     ),
-  moveSession: (key: string, body: Partial<AgentChoice> & { machine: string; cwd?: string; note?: string; stop_old?: boolean; force?: boolean; name?: string }) =>
+  moveSession: (key: string, body: Partial<AgentChoice> & { machine: string; cwd?: string; note?: string; create_dir?: boolean; stop_old?: boolean; force?: boolean; name?: string }) =>
     j<{ ok: boolean; error?: string; attach?: string; terminal_key?: string; session_key?: string; stopped?: boolean; source?: string }>(`/api/sessions/${encodeURIComponent(key)}/move`, { method: 'POST', body: JSON.stringify(body) }),
   paneScreen: (key: string) =>
     j<{ ok: boolean; error?: string; login: { stage: string; url?: string; options?: { n: number; label: string; chosen: boolean }[]; continue?: boolean } }>(`/api/panes/${encodeURIComponent(key)}/screen`),

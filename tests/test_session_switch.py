@@ -62,6 +62,22 @@ async def test_exhausted_claude_can_hand_over_to_codex(node):
     node._stop.assert_not_awaited()
 
 
+@pytest.mark.parametrize("work_mode", ["plan", "implement"])
+async def test_mode_change_keeps_conversation(node, work_mode):
+    result = await node._switch({"session_key": "test:claude:old", "work_mode": work_mode})
+    target = runner.launch.call_args.args[0]
+    assert result["resumed"] and target.resume == "old"
+    assert target.work_mode == work_mode
+
+
+async def test_mode_change_does_not_interrupt_busy_session(node):
+    node.locate.return_value.status = "busy"
+    with pytest.raises(LaunchError, match="session is working"):
+        await node._switch({"session_key": "test:claude:old", "work_mode": "implement"})
+    node._stop.assert_not_awaited()
+    runner.launch.assert_not_awaited()
+
+
 async def test_invalid_destination_never_stops_source(node, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda name: None if name == "codex" else "/bin/" + name)
     with pytest.raises(LaunchError, match="not installed"):
@@ -79,3 +95,50 @@ async def test_quick_catalog_does_not_wait_for_any_model_probes(node, monkeypatc
     r = await Catalog(node.s).get([], quick=True)
     assert r["harnesses"]["codex"] and r["harnesses"]["claude"]
     assert len(r["logins"]) == 2
+
+
+async def test_history_resume_preserves_claude_environment(node, tmp_path):
+    runtime = tmp_path / ".claude-move-isolated"
+    runtime.mkdir()
+    node.locate.return_value.extra["config_dir"] = str(runtime)
+    node.locate.return_value.status = "done"
+    node.locate.return_value.pid = None
+    result = await node._switch({"session_key": "test:claude:old", "harness": "claude"})
+    assert result["resumed"]
+    assert runner.launch.call_args.kwargs["runtime_home"] == runtime
+    node._stop.assert_not_awaited()
+
+
+async def test_main_claude_resume_keeps_default_profile_location(node, tmp_path, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    await node._switch({"session_key": "test:claude:old", "harness": "claude"})
+    assert runner.launch.call_args.kwargs["runtime_home"] is None
+
+
+async def test_moved_codex_hands_over_in_its_new_directory(node, tmp_path, monkeypatch):
+    # The thread row of a Codex session moved from another host still names the folder
+    # on that host; the handover must start where the session works on this one.
+    from agentdash.node import past
+
+    home = tmp_path / ".codex-move-abc"
+    home.mkdir()
+    past.record_move(home, "thread", str(tmp_path))
+    node.locate = AsyncMock(
+        return_value=Session(
+            key="test:codex:thread",
+            machine="test",
+            harness="codex",
+            session_id="thread",
+            status="idle",
+            pid=4321,
+            cwd="/home/other-host/project",
+            transcript_path=str(home / "sessions/rollout.jsonl"),
+            extra={"codex_home": str(home)},
+        )
+    )
+    r = await node._switch({"session_key": "test:codex:thread", "harness": "claude", "model": "fable"})
+    target = runner.launch.call_args.args[0]
+    assert r["ok"] and target.harness == "claude" and target.cwd == str(tmp_path)
+    assert target.model == "fable"

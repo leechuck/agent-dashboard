@@ -115,11 +115,12 @@
   })
 </script>
 
+<div class="terminal-view">
 <div class="thead">
   <a href={`#/session/${encodeURIComponent(key)}`}>← Session</a>
   <span class="name">{session?.name ?? key}</span>
   <span class="small muted">{status}</span>
-  <button class:primary={control} onclick={toggle}>{control ? 'Typing goes to the terminal' : 'Take control'}</button>
+  <button class:primary={control} aria-pressed={control} onclick={toggle}>{control ? 'Control on' : 'Take control'}</button>
 </div>
 <LoginHelper paneKey={key} />
 {#if error}
@@ -130,12 +131,17 @@
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="term" bind:this={host} onclick={() => term?.focus()}></div>
 <p class="small muted hint">tmux {(session?.extra as any)?.tmux?.target ?? key.split(':').slice(3).join(':')} on {session?.machine ?? key.split(':')[0]}. {control ? 'Click into the terminal and type.' : 'Watching only: "Take control" to type.'} To select text for copying, hold Shift while dragging.</p>
+</div>
 
 <style>
   .thead { display: flex; gap: 12px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--hairline); background: var(--surface); position: sticky; top: var(--sticky-top, 48px); z-index: 3; }
   .name { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .term { height: calc(100vh - 48px - 46px - 40px - 56px); min-height: 280px; background: var(--terminal-bg); padding: 4px; }
+  .terminal-view { height: calc(100dvh - 48px); display: flex; flex-direction: column; min-height: 180px; }
+  .term { flex: 1; min-height: 100px; background: var(--terminal-bg); padding: 4px; }
+  .thead { flex: none; }
+  .thead button { white-space: nowrap; min-height: 40px; }
   .connection { display: flex; align-items: center; gap: 16px; padding: 16px; background: var(--surface); border-bottom: 1px solid var(--hairline); }
   .hint { padding: 6px 16px; margin: 0; }
   @media (min-width: 960px) { .thead { top: 0; } }
+  @media (max-width: 959px) { .thead { gap: 8px; padding: 4px 10px; font-size: 13px; } .hint { display: none; } }
 </style>

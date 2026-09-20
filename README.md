@@ -44,12 +44,12 @@ What it does:
   side by side: `agentdash install account team`, then `claude-team` and
   `/login`; the cockpit says which login should take new work), Codex windows, OpenRouter credits
   and key cap, with reset countdowns and push at 80/95 %.
-- **History**: every past session of every machine, read from what the
-  harnesses keep on disk (Claude `projects/`, Codex threads, pi files), named by
-  their own titles. Open one, resume it in tmux where it is, or **move it to
-  another machine**: the transcript travels through the hub and the same
-  conversation continues there with `--resume` (ADR 0008). agentsview adds
-  full-text search when configured.
+- **History**: browse and paginate saved sessions on every online machine. Search
+  titles, request descriptions and folders, with optional conversation-text search
+  and excerpts from each host's own transcripts. Choose **Resume on ws**, **Resume
+  on lc-dell**, or another online host. Moves copy the conversation, working files,
+  dependencies, skills and configuration, show transfer progress, and tell the
+  resumed agent what moved and what external resources it may still need (ADR 0008).
 
 What it reuses: [agentsview](https://www.agentsview.io/) for history and
 analytics; Claude Remote Control and Codex remote control for deep interaction
@@ -67,6 +67,19 @@ its terminal available in the dashboard. For Codex, the shell function in
 `agentdash/install/files/codex-tmux.bashrc` is the better wrapper: it sends only
 interactive runs into tmux and leaves `codex exec`, `app-server`, pipes and
 scripts alone.
+
+Resume Codex in tmux, optionally bypassing approvals for that invocation:
+
+```sh
+agent-tmux codex resume
+agent-tmux codex resume --dangerously-bypass-approvals-and-sandbox
+agent-tmux codex resume --last --dangerously-bypass-approvals-and-sandbox
+```
+
+`resume` opens the session picker; `--last` resumes the latest session in the current
+directory. The bypass option uses two leading hyphens; `agent-tmux` also accepts
+the single-hyphen spelling and reports the correction. Bypass is never added unless
+you request it.
 
 ## Layout
 

@@ -3,6 +3,8 @@
   import { clock } from '../lib/format'
   import { fleet } from '../lib/store.svelte'
   import { editDiff, renderMarkdown } from '../lib/markdown'
+  import { agentQuestions, isQuestionTool } from '../lib/questions'
+  import QuestionBlock from './QuestionBlock.svelte'
   let { m, sessionKey = '' }: { m: Message; sessionKey?: string } = $props()
   let open = $state(false)
   let fetching = $state(false)
@@ -33,6 +35,8 @@
   const html = $derived(m.kind === 'text' && m.role === 'assistant' ? renderMarkdown(m.text) : '')
   const isEdit = $derived(m.tool_name === 'Edit' && typeof m.tool_input?.old_string === 'string' && typeof m.tool_input?.new_string === 'string')
   const more = $derived(m.slim ? (fetching ? '\n… loading the rest' : '\n… cut short') : '')
+  const questionWaiting = $derived(fleet.sessions[sessionKey]?.status === 'waiting' && !(fleet.messages[sessionKey] ?? []).some(other => other.kind === 'tool_result' && !!m.tool_use_id && other.tool_use_id === m.tool_use_id))
+  const questionTerminal = $derived(questionWaiting && fleet.sessions[sessionKey]?.extra?.tmux ? `#/terminal/${encodeURIComponent(sessionKey)}?control=1` : '')
 </script>
 
 {#if m.kind === 'text' && m.role === 'user'}
@@ -53,11 +57,17 @@
     <span class="mark">✻</span>
     <div class="body"><pre class="plain">{m.text}</pre></div>
   </div>
+{:else if m.kind === 'tool_use' && isQuestionTool(m.tool_name)}
+  <div class="question-message">
+    <QuestionBlock questions={agentQuestions(m.tool_input)} answerHref={questionTerminal} />
+    {#if m.slim}<button class="small" onclick={toggle} disabled={fetching}>{fetching ? 'Loading…' : 'Load full question'}</button>{/if}
+    <span class="when">{clock(m.ts)}</span>
+  </div>
 {:else if m.kind === 'tool_use'}
   <div class="tool">
     <button class="tline" onclick={toggle} aria-expanded={open}>
       <span class="mark call">●</span>
-      <span class="tname">{m.tool_name}</span><span class="tsum">({summary(m)})</span>
+      <span class="tname">{m.tool_name}</span><span class="tsum" class:file-path={['Read', 'Write', 'Edit'].includes(m.tool_name ?? '')}>({summary(m)})</span>
     </button>
     {#if open}
       {#if isEdit}
@@ -84,6 +94,7 @@
   /* the look of the agents' own terminals: a prompt mark for you, a bullet for the agent,
      green bullets for tool calls with their output hanging under a corner mark */
   .msg { display: flex; gap: 10px; padding: 7px 16px; }
+  .question-message { padding: 0 16px 8px; }
   .mark { flex: none; width: 14px; text-align: center; font-family: var(--mono); color: var(--muted); line-height: 1.55; }
   .body { flex: 1; min-width: 0; }
   .when { display: block; margin-top: 2px; font-size: 11.5px; color: var(--muted); }
@@ -112,10 +123,10 @@
   .md :global(li.d3) { margin-left: 54px; }
   .md :global(li.task) { list-style: none; margin-left: -18px; }
   .md :global(.box) { color: var(--cobalt); }
-  .md :global(code) { font-family: var(--mono); font-size: 13px; padding: 1px 5px; border-radius: 4px; background: var(--cobalt-soft); color: var(--cobalt); }
+  .md :global(code) { font-family: var(--mono); font-size: 13px; padding: 1px 5px; border-radius: 4px; background: var(--cobalt-soft); color: var(--text-code); }
   .md :global(pre.code) { margin: 6px 0 10px; padding: 10px 12px; background: var(--code-bg); color: var(--code-fg); border-radius: var(--radius); overflow-x: auto; font-size: 12.5px; line-height: 1.5; }
   .md :global(pre.code code) { padding: 0; background: none; color: inherit; font-size: inherit; }
-  .md :global(a) { color: var(--cobalt); text-decoration: underline; text-underline-offset: 2px; }
+  .md :global(a) { color: var(--text-link); text-decoration: underline; text-underline-offset: 2px; }
   .md :global(strong) { font-weight: 600; }
   .md :global(blockquote) { margin: 6px 0; padding: 2px 12px; border-left: 3px solid var(--hairline); color: var(--muted); }
   .md :global(hr) { border: 0; border-top: 1px solid var(--hairline); margin: 12px 0; }

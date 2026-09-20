@@ -8,6 +8,9 @@ const OPEN = '⟦'
 const CLOSE = '⟧'
 const SLOT = new RegExp(`${OPEN}(\\d+)${CLOSE}`, 'g')
 
+// Explicit paths and filename-like inline code; ordinary identifiers stay code.
+const isFile = (s: string) => /^(?:\/?(?:[\w.@~-]+\/)+[\w.@~:+-]*|[\w@~-]+\.[a-zA-Z][\w.-]*(?::\d+(?::\d+)?)?)$/.test(s)
+
 function inline(raw: string): string {
   // inline code first, so nothing inside it is touched
   const codes: string[] = []
@@ -18,7 +21,10 @@ function inline(raw: string): string {
   s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>').replace(/__([^_\n]+)__/g, '<strong>$1</strong>')
   s = s.replace(/(^|[^*\w])\*([^*\s][^*\n]*?)\*(?!\w)/g, '$1<em>$2</em>').replace(/(^|[^_\w])_([^_\s][^_\n]*?)_(?!\w)/g, '$1<em>$2</em>')
   s = s.replace(/~~([^~\n]+)~~/g, '<del>$1</del>')
-  return s.replace(SLOT, (whole, i) => (codes[Number(i)] === undefined ? whole : `<code>${esc(codes[Number(i)])}</code>`))
+  return s.replace(SLOT, (whole, i) => {
+    const code = codes[Number(i)]
+    return code === undefined ? whole : `<code${isFile(code) ? ' class="file-path"' : ''}>${esc(code)}</code>`
+  })
 }
 
 const cells = (line: string) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())

@@ -105,7 +105,12 @@ def launch_facts(agent: str, pid: int) -> dict[str, str]:
     has registered a session of its own (it may sit at a trust or login question)."""
     argv = procs.cmdline(pid)
     out: dict[str, str] = {}
-    flag = {"claude": "--resume", "codex": "resume", "pi": "--session"}.get(agent, "")
+    flag = {
+        "claude": "--resume",
+        "codex": "resume",
+        "pi": "--session",
+        "opencode": "--session",
+    }.get(agent, "")
     if flag in argv:
         i = argv.index(flag)
         if i + 1 < len(argv) and not argv[i + 1].startswith("-"):

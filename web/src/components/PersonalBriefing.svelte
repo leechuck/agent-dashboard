@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { renderMarkdown } from '../lib/markdown'
-  import ReportQuestions from './ReportQuestions.svelte'
   import { api } from '../lib/api'
   import { Fleet, fleet } from '../lib/store.svelte'
   import { ago, displayName } from '../lib/format'
@@ -163,7 +162,7 @@
 
 <section class="pa">
   <div class="head">
-    <h2>Message briefing</h2>
+    <h2>Personal briefing</h2>
     {#if running}
       <span class="small live">assistant is working…</span>
     {:else if generated}
@@ -172,7 +171,7 @@
     {#if pa?.session}<a class="small" href={`#/session/${encodeURIComponent(pa.session.key)}`} {target}>session{wide ? ' ↗' : ''}</a>{/if}
     <span class="push"></span>
     <button class="ghost" onclick={() => (showFocus = !showFocus)} title="Add a note for this run">note</button>
-    <button disabled={starting || running || !pa?.ok} onclick={run}>{b ? 'Generate new report' : 'Generate report'}</button>
+    <button disabled={starting || running || !pa?.ok} onclick={run}>{b ? 'Refresh briefing and drafts' : 'Review mail and draft replies'}</button>
   </div>
   {#if showFocus}
     <input class="focus" bind:value={focus} placeholder="Optional: what to look at first, e.g. 'only mail since Monday'" />
@@ -184,14 +183,17 @@
   {:else if pa && !pa.ok}
     <p class="small err">{pa.error}</p>
   {:else if !b}
-    <p class="small muted">Generate a report from mail, Mattermost and WhatsApp: recent developments, decisions and context, with links to the messages. Add a note to focus the report on a topic or period.</p>
+    <p class="small muted">Review received and sent mail with your laptop’s project context, prepare unsent drafts in Gnus, and ask for your decisions. Add a note to focus on a topic or period.</p>
   {:else}
     {#if b.summary}<p class="summary">{b.summary}</p>{/if}
 
     {#if b.report}<div class="report">{@html renderMarkdown(b.report)}</div>
     {:else}<p class="small muted">This is an older briefing. Generate a new report for the message-focused view.</p>{/if}
-    {#key generated}<ReportQuestions />{/key}
-    <details class="actions">
+    {#if pa?.session}
+      <p><a href={`#/session/${encodeURIComponent(pa.session.key)}`} {target}>Answer decisions or give the assistant follow-up instructions →</a></p>
+      <p class="small muted">Continues the PA session with access to Gnus and your projects. Prepared email drafts remain open in Gnus for review.</p>
+    {/if}
+    <details class="actions" open>
       <summary>Sources and actions ({items.length})</summary>
     <ul class="items">
       {#each sorted as item (item.id)}

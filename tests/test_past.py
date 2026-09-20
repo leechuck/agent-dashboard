@@ -144,3 +144,34 @@ def test_bundles_that_do_not_belong_are_refused(tmp_path):
         past.unpack(bad, "claude", "abc", "/w", tmp_path / ".claude")
     with pytest.raises(past.TransferError):
         past.unpack(bad, "opencode", "abc", "/w", tmp_path)
+
+
+def test_moved_claude_history_uses_saved_destination(tmp_path):
+    root = tmp_path / ".claude-move-fixture"
+    transcript = root / "projects/moved/session.jsonl"
+    _claude_transcript(transcript, "session", "/old-host/project")
+    (root / "agentdash-move.json").write_text(
+        json.dumps({"session_id": "session", "cwd": "/new/project"})
+    )
+    assert past.claude_session("ws", root, transcript).cwd == "/new/project"
+    assert past.relocated_cwd(root, "unrelated", "/original") == "/original"
+
+
+def test_moved_codex_history_uses_saved_destination(tmp_path):
+    # Codex keeps the source cwd in its thread row even after `codex resume --cd <new>`;
+    # the move record is what says where the session works now.
+    home = tmp_path / ".codex-move-fixture"
+    home.mkdir()
+    past.record_move(home, "t1", "/mnt/data1/project")
+    past.record_move(home, "t2", "/mnt/data1/other")  # a second move into the same store
+    t = {"id": "t1", "cwd": "/old-host/project", "title": "Slides", "updated_at_ms": 5}
+    assert past.codex_session("ws", t, home).cwd == "/mnt/data1/project"
+    assert past.relocated_cwd(home, "t2", "/x") == "/mnt/data1/other"
+    assert past.relocated_cwd(home, "t3", "/x") == "/x"
+    # the older single-session form stays readable and is kept when a record is added
+    (home / "agentdash-move.json").write_text(
+        json.dumps({"session_id": "legacy", "cwd": "/legacy/project"})
+    )
+    past.record_move(home, "t1", "/mnt/data1/project")
+    assert past.relocated_cwd(home, "legacy", "/x") == "/legacy/project"
+    assert past.relocated_cwd(home, "t1", "/x") == "/mnt/data1/project"

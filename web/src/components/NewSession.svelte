@@ -8,6 +8,7 @@
   let { machine: initialMachine = '', resume = '', title = '' }: { machine?: string; resume?: string; title?: string } = $props()
   let machine = $state(initialMachine)
   let cwd = $state(title)
+  let createDir = $state(false)
   let prompt = $state('')
   let name = $state('')
   let mode = $state<'background' | 'tmux'>('background')
@@ -46,14 +47,15 @@
     busy = true
     msg = ''
     try {
-      const r = await api.startSession(machine, { ...agent, cwd, prompt, name, resume, mode: effectiveMode })
+      const r = await api.startSession(machine, { ...agent, cwd, create_dir: createDir, prompt, name, resume, mode: effectiveMode })
       ok = r.ok
       msg = r.ok
         ? r.attach
           ? `Started in tmux. It shows up on the board in a few seconds; from a terminal on ${machine}: ${r.attach}`
           : `Started${r.job_id ? ` as ${r.job_id}` : ''}. It shows up on the board in a few seconds.`
         : r.error || r.output || 'failed'
-      if (r.ok) prompt = ''
+      if (r.warning) msg += ` ${r.warning}`
+      if (r.ok && !r.warning) prompt = ''
     } catch (err) {
       ok = false
       msg = String(err)
@@ -80,6 +82,7 @@
     <input list="dirs" bind:value={cwd} placeholder="/home/leechuck/…" required />
     <datalist id="dirs">{#each dirs as d}<option value={d}></option>{/each}</datalist>
   </label>
+  <label class="check"><input type="checkbox" bind:checked={createDir} /> Create directory if missing on {machine || 'the selected machine'}</label>
   <label>{resume ? 'Message (optional)' : 'Task'}
     <textarea rows="4" bind:value={prompt} placeholder={resume ? 'Continue with…' : 'What should it do? Leave empty to open it and type later.'}></textarea>
   </label>
@@ -107,6 +110,7 @@
   .new { padding: 16px; display: grid; gap: 12px; max-width: 760px; }
   h1 { font-size: 22px; margin: 0; }
   label { display: grid; gap: 4px; font-size: 14px; }
+  label.check { display: flex; align-items: center; gap: 8px; }
   input, select, textarea { padding: 8px 10px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--surface); font-size: 15px; }
   fieldset { border: 1px solid var(--hairline); border-radius: var(--radius); padding: 10px 12px 12px; margin: 0; background: var(--surface); }
   legend { font-size: 13px; color: var(--muted); padding: 0 6px; }

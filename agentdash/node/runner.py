@@ -42,7 +42,7 @@ from ..models import (
     SessionStatus,
     now_ms,
 )
-from . import briefing, commands, login_screen, past
+from . import briefing, commands, login_screen, past, transfer_http, workspace_transfer
 from .adapters import codex_rollout, hermes_state, opencode_store, pi_session
 from .adapters.claude_cli import job_action, kill_process
 from .adapters.claude_socket import SocketSendError, send_user_message
@@ -149,6 +149,8 @@ class Node:
             self._spawn(self.past_list(p))
         elif frame.type == "session.export":
             self._spawn(self.session_export(p))
+        elif frame.type == "session.prepare":
+            self._spawn(self.session_import({**p, "prepare_only": True}))
         elif frame.type == "session.import":
             self._spawn(self.session_import(p))
         elif frame.type == "pane.screen":
@@ -616,7 +618,7 @@ class Node:
         """What a tmux pane shows, and what a login screen in it asks for."""
         try:
             text = await capture(str(p.get("socket") or ""), str(p.get("target") or ""))
-            result = {"ok": True, "login": login_screen.read(text)}
+            result = {"ok": True, "login": login_screen.read(text), "screen": text}
             if result["login"]["stage"] == "done":
                 self._credentials_changed.set()  # the plan's numbers can be fetched now
         except (TmuxSendError, OSError, TimeoutError) as e:
@@ -683,22 +685,24 @@ class Node:
     async def past_list(self, p: dict[str, Any]) -> None:
         """Sessions this machine could resume, newest first."""
         harness = str(p.get("harness") or "")
-        limit = min(int(p.get("limit") or 120), 500)
+        limit = max(1, min(int(p.get("limit") or 120), 100_001))
         q = str(p.get("q") or "")
         found: list[Session] = []
         try:
             if harness in ("", "claude"):
                 found += await asyncio.to_thread(
-                    past.list_claude, self.machine, self.claude.config_dirs, limit
+                    past.list_claude, self.machine, self.claude.config_dirs, None
                 )
             if harness in ("", "codex"):
-                rows = await asyncio.to_thread(self.codex._query, "1=1", ())
+                rows = await asyncio.to_thread(self.codex._query, "1=1", (), None)
                 found += [past.codex_session(self.machine, t, self.codex.home) for t in rows]
             if harness in ("", "pi"):
-                found += await asyncio.to_thread(past.list_pi, self.machine, self.pi.dir, limit)
+                found += await asyncio.to_thread(past.list_pi, self.machine, self.pi.dir, None)
             live = {k for k, s in self.sessions.items() if s.status in ("busy", "idle", "waiting")}
-            found = [s for s in found if s.key not in live and past.matches(s, q)]
-            found.sort(key=lambda s: -s.updated_at)
+            found = await asyncio.to_thread(
+                past.search_sessions, found, q, live, p.get("titles") or {},
+                bool(p.get("content")),
+            )
             result: dict[str, Any] = {
                 "ok": True,
                 "sessions": [s.model_dump() for s in found[:limit]],
@@ -712,32 +716,42 @@ class Node:
         base = self.s.hub_url.rsplit("/nodes", 1)[0]
         return "http" + base[2:] if base.startswith("ws") else base
 
+    async def _move_progress(self, p, stage, completed=None, total=None):
+        if p.get("move_key"):
+            await self.hub.send(NODE_EVENT, {
+                "kind": "move.progress", "key": p["move_key"],
+                "stage": stage, "phase": p.get("move_phase", "Moving"),
+                "completed": completed, "total": total,
+            })
+
     async def session_export(self, p: dict[str, Any]) -> None:
         """Pack a session's transcript and hand it to the hub for another machine."""
         bundle: Path | None = None
+        stopped = False
         try:
             sess = await self.locate(p.get("session_key", ""))
             if not sess:
                 raise TransferError("unknown session")
+            if sess.harness == "tmux":
+                sess = _pane_as_agent(sess)
             live = sess.status in ("busy", "idle", "waiting") and sess.pid
             if live and sess.status == "busy" and not p.get("force"):
                 raise TransferError(
                     "the session is working; wait for it to finish its turn, or force"
                 )
             if live and p.get("stop", True):
-                await self._stop(sess)  # two agents must never write to one transcript
-            bundle, meta = await asyncio.to_thread(past.pack, sess, self.s.state_dir / "transfer")
+                await self._stop(sess)
+                stopped = True
+            await self._move_progress(p, "Packing environment")
+            bundle, meta = await asyncio.to_thread(
+                past.pack, sess, self.s.state_dir / "transfer", bool(p.get("environment"))
+            )
             blob = secrets.token_hex(16)
-            body = await asyncio.to_thread(bundle.read_bytes)  # gzip: a few MB at most
-            async with httpx.AsyncClient(timeout=600) as client:
-                r = await client.put(
-                    f"{self._hub_http()}/nodes/blob/{blob}",
-                    content=body,
-                    headers={"Authorization": f"Bearer {self.s.node_token}"},
-                )
-            if r.status_code >= 300:
-                raise TransferError(f"hub refused the bundle: {r.status_code} {r.text[:120]}")
-            result = {"ok": True, "blob": blob, "stopped": bool(live), **meta}
+            await transfer_http.upload(
+                bundle, f"{self._hub_http()}/nodes/blob/{blob}", self.s.node_token,
+                progress=lambda done, total: self._move_progress(p, "Uploading", done, total)
+            )
+            result = {"ok": True, "blob": blob, "stopped": stopped, **meta}
             result["extra"] = {
                 k: sess.extra[k] for k in ("config_dir", "account", "first_user") if k in sess.extra
             }
@@ -750,6 +764,7 @@ class Node:
             if bundle:
                 bundle.unlink(missing_ok=True)
         self._refresh.set()
+        result["stopped"] = stopped
         await self._reply("export.result", p, result)
 
     async def session_import(self, p: dict[str, Any]) -> None:
@@ -762,11 +777,21 @@ class Node:
             self.s.claude_config_dirs = discover_claude_dirs()
             spec = LaunchSpec.parse({**p, "harness": harness, "resume": sid})
             spec.prompt = str(p.get("note") or "")
-            if not Path(spec.cwd).expanduser().is_dir():
+            import shutil
+
+            _, launch_env = build(spec, self.s, self._endpoints(p))
+            if not shutil.which("tmux"):
+                raise TransferError("tmux is not installed on this machine")
+            if not spec.cwd.strip() or not Path(spec.cwd).expanduser().is_absolute():
+                raise TransferError("an absolute destination project directory is required")
+            destination = Path(spec.cwd).expanduser()
+            if not destination.exists() and not p.get("create_dir", True):
                 raise TransferError(
-                    f"{spec.cwd} does not exist on {self.machine}: clone or create it there"
-                    " first, or pick another folder"
+                    f"no such destination directory: {destination}; "
+                    "enable Create destination directory if missing"
                 )
+            if destination.exists() and not destination.is_dir():
+                raise TransferError(f"destination is not a directory: {destination}")
             if harness == "claude":
                 root = (
                     claude_config_dir(self.s, spec.login)
@@ -777,22 +802,77 @@ class Node:
                 root = self.codex.home
             else:
                 root = self.pi.dir
+            login_root = root
+            if harness == "claude" and spec.backend != "endpoint":
+                await _validate_claude_login(root, launch_env)
+            if p.get("environment") and harness in ("claude", "codex"):
+                # Session-specific config keeps the host's other agents unaffected.
+                import hashlib
+
+                identity = sid + str(p.get("transfer_id") or "")
+                suffix = hashlib.sha256(identity.encode()).hexdigest()[:16]
+                root = Path.home() / f".{harness}-move-{suffix}"
             bundle.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            async with httpx.AsyncClient(timeout=600) as client:
-                async with client.stream(
-                    "GET",
-                    f"{self._hub_http()}/nodes/blob/{p.get('blob', '')}",
-                    headers={"Authorization": f"Bearer {self.s.node_token}"},
-                ) as r:
-                    if r.status_code >= 300:
-                        raise TransferError(f"the hub has no such bundle ({r.status_code})")
-                    with bundle.open("wb") as f:
-                        async for chunk in r.aiter_bytes():
-                            f.write(chunk)
+            if p.get("size"):
+                await transfer_http.download(
+                    bundle, f"{self._hub_http()}/nodes/blob/{p.get('blob', '')}",
+                    self.s.node_token, int(p["size"]),
+                    progress=lambda done, total: self._move_progress(p, "Downloading", done, total),
+                )
+            else:
+                async with httpx.AsyncClient(timeout=600) as client:
+                    async with client.stream(
+                        "GET",
+                        f"{self._hub_http()}/nodes/blob/{p.get('blob', '')}",
+                        headers={"Authorization": f"Bearer {self.s.node_token}"},
+                    ) as r:
+                        if r.status_code >= 300:
+                            raise TransferError(f"the hub has no such bundle ({r.status_code})")
+                        with bundle.open("wb") as f:
+                            async for chunk in r.aiter_bytes():
+                                f.write(chunk)
+            await self._move_progress(
+                p, "Checking destination" if p.get("prepare_only") else "Restoring environment"
+            )
+            await asyncio.to_thread(
+                past.unpack, bundle, harness, sid, spec.cwd, root, check_only=True,
+            )
+            has_environment = await asyncio.to_thread(
+                workspace_transfer.restore, bundle, Path(spec.cwd).expanduser(), Path.home(), root,
+                check_only=bool(p.get("prepare_only")),
+            )
+            if p.get("environment") and not has_environment:
+                raise TransferError("source node did not include the environment; update that node")
+            if not has_environment and not Path(spec.cwd).expanduser().is_dir():
+                raise TransferError(f"no such directory: {spec.cwd}")
+            if p.get("prepare_only"):
+                await self._reply("import.result", p, {"ok": True, "prepared": True})
+                return
             path = await asyncio.to_thread(past.unpack, bundle, harness, sid, spec.cwd, root)
+            if harness in ("claude", "codex"):
+                past.record_move(root, sid, spec.cwd)
+            if harness == "claude" and root not in self.claude.config_dirs:
+                self.claude.config_dirs.append(root)
+                self.s.claude_config_dirs = list(self.claude.config_dirs)
             if harness == "pi":
                 spec.resume = str(path)  # pi resumes by file
-            result = await launch(spec, self.s, self._endpoints(p))
+            if has_environment and harness in ("claude", "codex"):
+                credential = ".credentials.json" if harness == "claude" else "auth.json"
+                local_credential = login_root / credential
+                if local_credential.exists() and not (root / credential).exists():
+                    (root / credential).symlink_to(local_credential)
+            if has_environment and harness == "claude":
+                workspace_transfer.bootstrap_claude_login(login_root, root, Path.home())
+            spec.prompt = workspace_transfer.relocation_message(
+                str(p.get("source_machine") or "source host"), self.machine,
+                str(p.get("source_cwd") or ""), spec.cwd, has_environment, spec.prompt,
+            )
+            spec.prompt += f"\nAgent configuration and session storage on this host: {root}\n"
+            await self._move_progress(p, "Starting resumed agent")
+            result = await launch(
+                spec, self.s, self._endpoints(p),
+                runtime_home=root if has_environment and harness in ("claude", "codex") else None,
+            )
             result["session_key"] = Session.make_key(self.machine, harness, sid)
             result["transcript_path"] = str(path)
         except (TransferError, LaunchError, httpx.HTTPError, OSError, ValueError) as e:
@@ -801,7 +881,8 @@ class Node:
             log.exception("import failed")
             result = {"ok": False, "error": f"{e.__class__.__name__}: {e}"[:300]}
         finally:
-            bundle.unlink(missing_ok=True)
+            with suppress(OSError):
+                bundle.unlink(missing_ok=True)
         self._refresh.set()
         await self._reply("import.result", p, result)
 
@@ -811,11 +892,15 @@ class Node:
             raise LaunchError("unknown session")
         if sess.harness == "tmux":
             sess = _pane_as_agent(sess)
-        if sess.harness not in ("claude", "codex", "pi"):
+        if sess.harness not in ("claude", "codex", "pi", "opencode"):
             raise LaunchError(f"{sess.harness} sessions cannot be restarted from here")
         self.s.claude_config_dirs = discover_claude_dirs()
+        saved_cwd = sess.cwd
+        store = sess.extra.get("config_dir" if sess.harness == "claude" else "codex_home")
+        if sess.harness in ("claude", "codex") and store:
+            saved_cwd = past.relocated_cwd(Path(store), sess.session_id, saved_cwd)
         target = LaunchSpec.parse(
-            {**p, "cwd": p.get("cwd") or sess.cwd, "harness": p.get("harness") or sess.harness}
+            {**p, "cwd": p.get("cwd") or saved_cwd, "harness": p.get("harness") or sess.harness}
         )
         # Validate the executable, endpoint and model before stopping the source agent.
         build(target, self.s, self._endpoints(p))
@@ -857,7 +942,20 @@ class Node:
             target.prompt = handover_prompt(sess, note)
             if p.get("stop_old") and sess.pid:
                 await self._stop(sess)
-        result = await launch(target, self.s, self._endpoints(p))
+        runtime = Path(sess.extra.get("codex_home") or "")
+        if same_harness and sess.harness == "codex" and runtime.name.startswith(".codex-move-"):
+            result = await launch(target, self.s, self._endpoints(p), runtime_home=runtime)
+        elif same_harness and sess.harness == "claude" and target.backend == "default":
+            config = sess.extra.get("config_dir")
+            runtime = Path(config) if config else None
+            if runtime == Path.home() / ".claude":
+                runtime = None
+            result = await launch(
+                target, self.s, self._endpoints(p),
+                runtime_home=runtime,
+            )
+        else:
+            result = await launch(target, self.s, self._endpoints(p))
         result["resumed"] = same_harness
         result["session_key"] = (
             Session.make_key(self.machine, target.harness, sess.session_id)
@@ -1072,7 +1170,7 @@ def _pane_as_agent(sess: Session) -> Session:
     """A tmux pane whose agent has no session of its own yet, seen as that agent: what it
     resumes (if anything) is read from its command line."""
     agent = str(sess.extra.get("agent") or "")
-    if agent not in ("claude", "codex", "pi"):
+    if agent not in ("claude", "codex", "pi", "opencode"):
         return sess
     x = dict(sess.extra)
     resume = str(x.get("resume") or "")
@@ -1086,6 +1184,29 @@ def _pane_as_agent(sess: Session) -> Session:
         }
     )
     return out
+
+
+async def _validate_claude_login(root: Path, launch_env: dict) -> None:
+    """Use the CLI's own credential resolution, including keychain and API-key setups."""
+    import shutil
+
+    process = await asyncio.create_subprocess_exec(
+        shutil.which("claude") or "claude", "auth", "status", "--json",
+        env={**os.environ, **launch_env, "CLAUDE_CONFIG_DIR": str(root)},
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, _ = await asyncio.wait_for(process.communicate(), 20)
+    except TimeoutError:
+        process.kill()
+        await process.wait()
+        raise TransferError("destination Claude login check timed out") from None
+    try:
+        status = json.loads(stdout)
+    except ValueError:
+        raise TransferError("cannot check destination Claude login; update its CLI") from None
+    if not status.get("loggedIn"):
+        raise TransferError("Claude is logged out on the destination; sign in there before moving")
 
 
 def _credentials_alive(path: Path) -> bool:

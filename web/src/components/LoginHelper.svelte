@@ -74,16 +74,20 @@
         <button class:primary={o.n === 1} disabled={busy} onclick={() => choose(o.n, screen!.options ?? [])}>{o.label}</button>
       {/each}
     {:else if screen.stage === 'browser' || screen.stage === 'code'}
-      <div class="step"><b>1.</b> <a class="btn primary" href={screen.url} target="_blank" rel="noopener">Open the sign-in page</a>
+      <div class="login-title">Sign in to Claude on {paneKey.split(':')[0]}</div>
+      <div class="step"><b>1.</b> <a class="btn primary" href={screen.url} target="_blank" rel="noopener">Open sign-in in this browser</a>
         <button onclick={() => copy(screen!.url!)}>{copied ? 'Copied' : 'Copy link'}</button>
-        <span class="small muted">sign in with the account this login is for</span></div>
+        <span class="small muted">opens on this device; the remote terminal waits for your code</span></div>
       <form class="step" onsubmit={(e) => { e.preventDefault(); if (code.trim()) press(['Enter'], code.trim()).then(() => (code = '')) }}>
         <b>2.</b> <input bind:value={code} placeholder="Paste the code the page shows" autocomplete="off" spellcheck="false" />
         <button class="primary" type="submit" disabled={busy || !code.trim()}>Send code</button>
       </form>
     {:else if screen.stage === 'trust'}
       <span>Claude asks whether you trust this folder.</span>
-      <button class="primary" disabled={busy} onclick={() => press(['Down', 'Enter'])}>Yes, I trust it</button>
+      {#each screen.options ?? [] as o (o.n)}
+        <button disabled={busy} onclick={() => choose(o.n, screen!.options ?? [])}>{o.label}</button>
+      {/each}
+      {#if !screen.options?.length}<span class="small">Choose an option in the terminal below.</span>{/if}
     {:else if screen.stage === 'done'}
       <span class="ok">Logged in. Limits shows this plan within a minute.</span>
       {#if screen.continue}<button disabled={busy} onclick={() => press(['Enter'])}>Continue</button>{/if}
@@ -93,8 +97,9 @@
 {/if}
 
 <style>
+  .login-title { width: 100%; font-weight: 700; }
   .login-status { padding: 8px 16px; }
-  .lh { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; padding: 10px 16px; background: var(--cobalt-soft); border-bottom: 1px solid var(--hairline); }
+  .lh { flex: none; display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; padding: 10px 16px; background: var(--cobalt-soft); border-bottom: 1px solid var(--hairline); }
   .step { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
   .step input { flex: 1 1 260px; padding: 6px 8px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--surface); font-family: var(--mono, monospace); }
   button, .btn { font-size: 13px; padding: 5px 12px; }

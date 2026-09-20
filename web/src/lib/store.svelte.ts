@@ -1,7 +1,10 @@
 import { api, subscribe } from './api'
 import type { BusEvent, Catalog, Cockpit, SlashCommand, Decision, Machine, Message, Session, UsageWindow } from './types'
 
+export type MoveProgress = { key: string; stage: string; phase: string; completed?: number; total?: number }
+
 export class Fleet {
+  moves = $state<Record<string, MoveProgress>>({})
   machines = $state<Record<string, Machine>>({})
   sessions = $state<Record<string, Session>>({})
   messages = $state<Record<string, Message[]>>({})
@@ -57,7 +60,10 @@ export class Fleet {
   }
 
   apply(e: BusEvent) {
-    if (e.kind === 'session.updated') {
+    if (e.kind === 'move.progress') {
+      const progress = e.data as MoveProgress
+      this.moves[progress.key] = progress
+    } else if (e.kind === 'session.updated') {
       const s = e.data as Session
       this.sessions[s.key] = s
     } else if (e.kind === 'machine.updated') {

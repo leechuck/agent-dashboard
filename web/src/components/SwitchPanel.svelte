@@ -21,7 +21,7 @@
   let busy = $state(false)
   let result = $state<{ ok: boolean; text: string; terminal?: string } | null>(null)
   const same = $derived(agent.harness === harness)
-  const resumable = $derived(['claude', 'codex', 'pi'].includes(harness))
+  const resumable = $derived(['claude', 'codex', 'pi', 'opencode'].includes(harness))
 
   let catalogLoading = $state(false)
   let catalogError = $state('')
@@ -50,7 +50,7 @@
     try {
       const r = await api.switchSession(session.key, { ...agent, note, force, stop_old: stopOld })
       result = r.ok
-        ? { ok: true, terminal: r.terminal_key, text: r.resumed ? `The conversation continues with the new settings in tmux (${r.attach}).` : `A ${agent.harness} agent took over in the same folder (${r.attach}).` }
+        ? { ok: true, terminal: r.terminal_key, text: r.warning || (r.resumed ? `The conversation continues with the new settings in tmux (${r.attach}).` : `A ${agent.harness} agent took over in the same folder (${r.attach}).`) }
         : { ok: false, text: r.error ?? 'failed' }
     } catch (e) {
       result = { ok: false, text: String(e) }
@@ -61,9 +61,9 @@
 </script>
 
 <div class="sw">
-  <div class="lead">Switch agent, model or subscription</div>
+  <div class="lead">Change mode, agent, model or subscription</div>
   <p class="small muted">
-    {#if same}Same agent: the conversation is kept. The current process is ended and restarted with <code>--resume</code> on what you pick{session.harness === 'claude' ? ' (another Claude login works because logins share transcripts)' : ''}.
+    {#if same}The conversation is kept. The current process is ended and resumed with the selected settings{session.harness === 'claude' ? ' (another Claude login works because logins share transcripts)' : ''}. Choose Implementation and add a message below when you are ready to carry out the plan.
     {:else}Another agent cannot load this conversation. It starts in the same folder with a briefing and the path of this transcript.{/if}
   </p>
   <div class="shortcuts">
@@ -82,7 +82,7 @@
     {/if}
   </div>
   <div class="acts">
-    <button class="primary" disabled={busy || (same && !resumable) || (same && session.status === 'busy' && !force)} onclick={go}>{busy ? 'Switching…' : same ? 'Continue with selected subscription / model' : 'Continue in ' + agent.harness}</button>
+    <button class="primary" disabled={busy || (same && !resumable) || (same && session.status === 'busy' && !force)} onclick={go}>{busy ? 'Switching…' : same ? 'Apply settings and resume' : 'Continue in ' + agent.harness}</button>
     <button onclick={onclose}>Close</button>
     {#if same && !resumable}<span class="small muted">{session.harness} sessions cannot be restarted from here.</span>{/if}
   </div>

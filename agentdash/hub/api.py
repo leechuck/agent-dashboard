@@ -7,11 +7,12 @@ import json
 import re
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from ..models import now_ms as _now
+from ..transfer_limits import REQUEST_TIMEOUT
 from . import blobs
 from . import cockpit as ck
 from .auth import require_web_token
@@ -174,6 +175,8 @@ async def session_action(key: str, body: ActionBody, request: Request):
 
 class StartBody(BaseModel):
     cwd: str
+    create_dir: bool = False
+    work_mode: str = ""
     prompt: str = ""
     name: str = ""
     resume: str = ""
@@ -420,6 +423,7 @@ async def open_login(machine_id: str, body: LoginBody, request: Request):
 
 class SwitchBody(BaseModel):
     harness: str = ""
+    work_mode: str = ""
     backend: str = "default"
     login: str = ""
     endpoint: str = ""
@@ -446,15 +450,18 @@ async def switch_session(key: str, body: SwitchBody, request: Request):
 
 @router.get("/past")
 async def past_sessions(
-    request: Request, machine: str = "", harness: str = "", q: str = "", limit: int = 120
+    request: Request, machine: str = "", harness: str = "", q: str = "",
+    limit: int = Query(120, ge=1, le=200), offset: int = Query(0, ge=0, le=100_000),
+    content: bool = False,
 ):
     """Sessions that are over but still on disk, from every online machine (or one):
     what can be opened, resumed, or moved elsewhere."""
     st = _state(request)
     machines = [machine] if machine else sorted(st.nodes)
-    payload = {"harness": harness, "q": q, "limit": limit}
+    payload = {"harness": harness, "q": q, "limit": offset + limit + 1,
+               "content": content, "titles": st.titler.titles}
     results = await asyncio.gather(
-        *(_node_call(request, m, "past.list", payload, timeout=60) for m in machines),
+        *(_node_call(request, m, "past.list", payload, timeout=180) for m in machines),
         return_exceptions=True,
     )
     sessions: list[dict] = []
@@ -465,7 +472,8 @@ async def past_sessions(
             continue
         sessions += r.get("sessions") or []
     sessions.sort(key=lambda s: -int(s.get("updated_at") or 0))
-    sessions = sessions[:limit]
+    has_more = len(sessions) > offset + limit
+    sessions = sessions[offset:offset + limit]
     from ..models import Session
 
     for raw in sessions:
@@ -473,11 +481,14 @@ async def past_sessions(
             st.past[raw["key"]] = Session.model_validate(raw)
         except ValueError:
             continue
-    return {"sessions": sessions, "errors": errors}
+    return {"sessions": sessions, "errors": errors, "has_more": has_more}
 
 
 class MoveBody(BaseModel):
+    environment: bool = True
+    create_dir: bool = True
     machine: str  # where it goes
+    work_mode: str = ""
     cwd: str = ""  # folder there; default the same path
     backend: str = "default"
     login: str = ""
@@ -501,29 +512,56 @@ async def move_session(key: str, body: MoveBody, request: Request):
         raise HTTPException(400, "that is the machine it is on")
     if body.machine not in st.nodes:
         raise HTTPException(409, f"{body.machine} is offline")
+    endpoints = await ck.endpoints_setting(st.db)
     exported = await _node_call(
-        request,
-        source,
-        "session.export",
-        {"session_key": key, "stop": body.stop_old, "force": body.force},
-        timeout=900,
+        request, source, "session.export",
+        {"move_key": key, "move_phase": "Destination preflight", "session_key": key,
+         "stop": False, "force": body.force,
+         "environment": body.environment}, timeout=REQUEST_TIMEOUT,
     )
     if not exported.get("ok"):
         return exported
     blob = str(exported.get("blob") or "")
     try:
         spec = {
-            **body.model_dump(),
-            "harness": exported["harness"],
-            "session_id": exported["session_id"],
-            "cwd": body.cwd or exported.get("cwd") or "",
-            "blob": blob,
-            "mode": "tmux",
+            **body.model_dump(), "move_key": key, "move_phase": "Destination preflight",
+            "endpoints": endpoints, "transfer_id": blob, "size": exported.get("size", 0),
+            "source_machine": source, "source_cwd": exported.get("cwd", ""),
+            "model": body.model or exported.get("model") or "",
+            "harness": exported["harness"], "session_id": exported["session_id"],
+            "cwd": body.cwd or exported.get("cwd") or "", "blob": blob, "mode": "tmux",
             "name": body.name or exported.get("name") or "",
         }
-        imported = await _node_call(request, body.machine, "session.import", spec, timeout=900)
+        prepared = await _node_call(
+            request, body.machine, "session.prepare",
+            {**spec, "prepare_only": True}, timeout=REQUEST_TIMEOUT,
+        )
+        if not prepared.get("ok") or not prepared.get("prepared"):
+            return {**prepared, "ok": False, "stopped": False,
+                    "error": prepared.get("error") or "destination node needs updating"}
+        if body.stop_old:
+            blobs.remove(request.app.state.settings.state_dir, blob)
+            exported = await _node_call(
+                request, source, "session.export",
+                {"move_key": key, "move_phase": "Final transfer", "session_key": key,
+                 "stop": True, "force": body.force,
+                 "environment": body.environment}, timeout=REQUEST_TIMEOUT,
+            )
+            if not exported.get("ok"):
+                return exported
+            blob = str(exported.get("blob") or "")
+            spec["blob"] = blob
+            spec["size"] = exported.get("size", 0)
+        spec["move_phase"] = "Final transfer"
+        imported = await _node_call(
+            request, body.machine, "session.import", spec, timeout=REQUEST_TIMEOUT
+        )
+    except HTTPException as e:
+        imported = {"ok": False, "error": str(e.detail),
+                    "destination_uncertain": True}
     finally:
         blobs.remove(request.app.state.settings.state_dir, blob)
+
     if imported.get("ok") and imported.get("tmux"):
         t = imported["tmux"]
         imported["terminal_key"] = f"{body.machine}:tmux:{t['socket']}:{t['target']}"
@@ -665,7 +703,10 @@ async def _pa(request: Request, payload: dict, timeout: float = 120) -> dict:
             "agent": agents["personal"],
             "endpoints": await ck.endpoints_setting(st.db),
         }
-    order = sorted(st.nodes, key=lambda m: (m != prefer, m))
+    # A different machine may have a checkout, but not the laptop's mail or Gnus.
+    if prefer and prefer not in st.nodes:
+        return {"ok": False, "error": f"Personal assistant machine {prefer} is offline"}
+    order = [prefer] if prefer else sorted(st.nodes)
     if not order:
         raise HTTPException(503, "no machine is online")
     for machine in order:

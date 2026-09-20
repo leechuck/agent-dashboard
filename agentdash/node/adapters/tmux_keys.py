@@ -48,7 +48,7 @@ async def type_prompt(socket: str, target: str, text: str) -> None:
 
 
 # keys the dashboard may press in a pane: enough to answer a menu or a question
-KEYS = {"Enter", "Up", "Down", "Left", "Right", "Escape", "Tab", "BSpace", "C-c", "y", "n",
+KEYS = {"Enter", "Up", "Down", "Left", "Right", "Escape", "Tab", "BTab", "BSpace", "C-c", "y", "n",
         "1", "2", "3", "4", "5", "6", "7", "8", "9"}  # fmt: skip
 
 

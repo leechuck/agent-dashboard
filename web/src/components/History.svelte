@@ -8,7 +8,7 @@
 
   // Past sessions come from the machines themselves (what each harness keeps on disk),
   // so every one of them can be opened, resumed there, or moved to another machine.
-  // agentsview, when configured, adds full-text search over the same history.
+  // Conversation text is searched on each host; legacy index links remain readable.
   let { id }: { id?: string } = $props()
   let q = $state('')
   let harness = $state('')
@@ -17,41 +17,41 @@
   let errors = $state<Record<string, string>>({})
   let loading = $state(false)
   let error = $state('')
-  let mode = $state<'past' | 'text'>('past')
+  let content = $state(false)
+  let hasMore = $state(false)
+  let page = $state(0)
+  let generation = 0
+  const pageSize = 50
   let publicUrl = $state('')
-  let textEnabled = $state(false)
-  let textRows = $state<HistorySession[]>([])
   let detail = $state<{ session: HistorySession; messages: HistoryMessage[] } | null>(null)
   let acting = $state<Record<string, string>>({})
   let timer: ReturnType<typeof setTimeout> | undefined
 
   const machines = $derived(Object.values(fleet.machines).filter((m) => m.online).map((m) => m.id))
 
-  async function load() {
+  async function load(append = false) {
+    const ticket = ++generation
+    if (!append) page = 0
     loading = true
     error = ''
     try {
-      if (mode === 'past') {
-        const r = await api.past({ machine, harness, q: q.trim(), limit: 150 })
-        rows = r.sessions
-        errors = r.errors
-        for (const s of rows) if (!fleet.sessions[s.key]) fleet.sessions[s.key] = s
-      } else if (q.trim()) {
-        const r = await history.search(q.trim())
-        textRows = (r.results ?? []).map((x) => ({ ...x, id: x.session_id ?? x.id, first_message: x.name ?? x.first_message ?? '' }))
-      } else {
-        textRows = (await history.sessions(harness ? { agent: harness } : {})).sessions
-      }
+      const r = await api.past({ machine, harness, q: q.trim(), limit: pageSize, offset: append ? (page + 1) * pageSize : 0, content })
+      if (ticket !== generation) return
+      rows = append ? [...rows, ...r.sessions.filter(s => !rows.some(old => old.key === s.key))] : r.sessions
+      if (append) page += 1
+      hasMore = r.has_more
+      errors = r.errors
+      for (const s of rows) if (!fleet.sessions[s.key]) fleet.sessions[s.key] = s
     } catch (e) {
-      error = String(e)
+      if (ticket === generation) error = String(e)
     } finally {
-      loading = false
+      if (ticket === generation) loading = false
     }
   }
 
   function onInput() {
     clearTimeout(timer)
-    timer = setTimeout(load, 300)
+    timer = setTimeout(() => load(), content ? 800 : 300)
   }
 
   /** Start the same conversation again on its own machine, in tmux. */
@@ -85,7 +85,6 @@
     try {
       const c = await api.config()
       publicUrl = c.history_public_url
-      textEnabled = c.history_enabled
     } catch {
       /* optional */
     }
@@ -132,32 +131,28 @@
   {:else}
     <div class="top">
       <h1>History</h1>
-      {#if textEnabled}
-        <div class="modes small">
-          <button class:on={mode === 'past'} onclick={() => { mode = 'past'; load() }}>Past sessions</button>
-          <button class:on={mode === 'text'} onclick={() => { mode = 'text'; load() }}>Full-text search</button>
-        </div>
-      {/if}
+
     </div>
     <div class="filters">
-      <input type="search" placeholder={mode === 'past' ? 'Filter by title, request, folder or id' : 'Search the text of all sessions'} bind:value={q} oninput={onInput} />
-      <select bind:value={harness} onchange={load}>
+      <input type="search" placeholder="Search title, description, folder or id" bind:value={q} oninput={onInput} />
+      <select bind:value={harness} onchange={() => load()}>
         <option value="">any agent</option>
         {#each ['claude', 'codex', 'pi'] as a}<option value={a}>{a}</option>{/each}
       </select>
-      {#if mode === 'past' && machines.length > 1}
-        <select bind:value={machine} onchange={load}>
+      {#if machines.length > 1}
+        <select bind:value={machine} onchange={() => load()}>
           <option value="">every machine</option>
           {#each machines as m}<option value={m}>{m}</option>{/each}
         </select>
       {/if}
-      <button onclick={load} disabled={loading} title="Read the machines again">↻</button>
+      <label class="content-search"><input type="checkbox" bind:checked={content} onchange={() => load()} /> include conversation text</label>
+      <button onclick={() => load()} disabled={loading} title="Read the machines again">↻</button>
     </div>
+    <p class="notice small muted">Browse saved conversations from online machines. Resume where they were, or choose another host to copy the working environment and continue there.</p>
     {#if error}<p class="notice err">{error}</p>{/if}
     {#each Object.entries(errors) as [m, e] (m)}<p class="notice err small">{m}: {e}</p>{/each}
-    {#if loading && rows.length === 0 && textRows.length === 0}<p class="notice muted">Reading the machines…</p>{/if}
+    {#if loading}<p class="notice muted" role="status">{content && q.trim() ? 'Searching saved conversation text… This can take a little while.' : 'Reading saved sessions…'}</p>{/if}
 
-    {#if mode === 'past'}
       {#if !loading && rows.length === 0 && !error}<p class="notice muted">No past session matches.</p>{/if}
       <ul>
         {#each rows as s (s.key)}
@@ -173,16 +168,17 @@
                 <div class="l2 small muted">
                   {shortCwd(s.cwd) || '(folder unknown)'}{modelLabel(s) ? ` · ${modelLabel(s)}` : ''}{size(s) ? ` · ${size(s)}` : ''}{(s.extra as any)?.account ? ` · ${(s.extra as any).account}` : ''}
                 </div>
+                {#if (s.extra as any)?.search_excerpt}<div class="excerpt small">…{(s.extra as any).search_excerpt}…</div>{/if}
                 {#if (s.extra as any)?.first_user && (s.extra as any).first_user !== displayName(s)}
                   <div class="l3 small">{(s.extra as any).first_user}</div>
                 {/if}
               </a>
               {#if resumable(s)}
                 <div class="acts">
-                  <button class="primary" disabled={!!acting[s.key]?.startsWith('Resuming')} onclick={() => resume(s)} title={`Resume on ${s.machine} in tmux`}>Resume</button>
-                  {#if machines.filter((m) => m !== s.machine).length}
-                    <a class="btn" href={`#/session/${encodeURIComponent(s.key)}?move=1`} title="Resume it on another machine">Move…</a>
-                  {/if}
+                  <button class="primary" disabled={!!acting[s.key]?.startsWith('Resuming')} onclick={() => resume(s)} title={`Resume on ${s.machine} in tmux`}>Resume on {s.machine}</button>
+                  {#each machines.filter(m => m !== s.machine) as destination}
+                    <a class="btn" href={`#/session/${encodeURIComponent(s.key)}?move=1&target=${encodeURIComponent(destination)}`}>Resume on {destination}…</a>
+                  {/each}
                 </div>
               {/if}
             </div>
@@ -190,34 +186,18 @@
           </li>
         {/each}
       </ul>
-    {:else}
-      {#if !loading && textRows.length === 0 && !error}<p class="notice muted">No sessions match.</p>{/if}
-      <ul>
-        {#each textRows as s (s.id)}
-          <li>
-            <a class="row main" href={`#/history/${encodeURIComponent(s.id)}`}>
-              <div class="l1">
-                <span class="agent">{s.agent}</span>
-                <span class="name">{s.project}</span>
-                <span class="mach muted small">{s.machine}</span>
-                <span class="when muted small">{whenIso(s.started_at)}</span>
-              </div>
-              <div class="l3 small">{s.first_message || '(no prompt)'}</div>
-              <div class="l2 small muted">{s.message_count} messages · {shortCwd(s.cwd)}</div>
-            </a>
-          </li>
-        {/each}
-      </ul>
-    {/if}
+      {#if hasMore}<button class="more" disabled={loading} onclick={() => load(true)}>{loading ? 'Loading…' : 'Load older sessions'}</button>{/if}
+
   {/if}
 </section>
 
 <style>
+  .content-search { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+  .excerpt { white-space: normal; overflow-wrap: anywhere; color: var(--ink); }
+  .more { margin: 16px; }
+  @media (max-width: 600px) { .row { flex-direction: column; } .main { width: 100%; max-width: 100%; } .l2 { overflow-wrap: anywhere; } .acts { flex-direction: row !important; flex-wrap: wrap; } .l1 { flex-wrap: wrap; } .when { margin-left: 0 !important; } }
   .top { display: flex; align-items: baseline; gap: 14px; padding: 16px 16px 8px; flex-wrap: wrap; }
   h1 { font-size: 22px; margin: 0; }
-  .modes { display: flex; gap: 2px; border: 1px solid var(--hairline); border-radius: var(--radius); overflow: hidden; }
-  .modes button { border: 0; border-radius: 0; padding: 4px 10px; background: var(--surface); }
-  .modes button.on { background: var(--cobalt-soft); color: var(--cobalt); font-weight: 600; }
   .filters { display: flex; gap: 8px; padding: 0 16px 10px; flex-wrap: wrap; }
   input[type='search'] { flex: 1 1 200px; padding: 8px 10px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--surface); }
   select { padding: 6px 8px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--surface); }

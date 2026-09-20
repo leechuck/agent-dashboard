@@ -287,6 +287,9 @@ class HubState:
 
     async def node_event(self, machine: str, p: dict[str, Any]) -> None:
         """An event frame from a node: the answer to a request, a reminder, or news."""
+        if p.get("kind") == "move.progress":
+            self.bus.publish("move.progress", {"machine": machine, **p})
+            return
         rid = p.get("request_id")
         if rid and self.resolve(rid, p):
             return

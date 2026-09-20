@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick, untrack } from 'svelte'
   import { Fleet, fleet } from '../lib/store.svelte'
   import { api } from '../lib/api'
   import { backendLabel, contextOf, displayName, modelLabel, shortCwd, statusLabel } from '../lib/format'
@@ -8,6 +9,7 @@
   import SessionSwitcher from './SessionSwitcher.svelte'
   import SwitchPanel from './SwitchPanel.svelte'
   import MovePanel from './MovePanel.svelte'
+  import { isQuestionTool } from '../lib/questions'
 
   let { key }: { key: string } = $props()
   const session = $derived(fleet.sessions[key])
@@ -20,9 +22,18 @@
   let showExec = $state(false)
   let switching = $state(false)
   let moving = $state(false)
+  let moveTarget = $state('')
+  let detailsOpen = $state(window.matchMedia('(min-width: 960px)').matches)
+  const questionMessages = $derived(messages.filter(m => m.kind === 'tool_use' && isQuestionTool(m.tool_name)))
+  async function showQuestion() {
+    detailsOpen = false
+    await tick()
+    const blocks = list?.querySelectorAll('.question-block')
+    blocks?.item(blocks.length - 1)?.scrollIntoView({ block: 'start', behavior: 'instant' })
+  }
   let resumeMsg = $state('')
   const live = $derived(!!session && ['busy', 'idle', 'waiting'].includes(session.status))
-  const resumable = $derived(!!session && ['claude', 'codex', 'pi'].includes(session.harness === 'tmux' ? String(x.agent ?? '') : session.harness))
+  const resumable = $derived(!!session && ['claude', 'codex', 'pi', 'opencode'].includes(session.harness === 'tmux' ? String(x.agent ?? '') : session.harness))
   const elsewhere = $derived(Object.values(fleet.machines).some((m) => m.online && session && m.id !== session.machine))
   /** Start this conversation again where it is, with the same agent and settings. */
   async function resume() {
@@ -62,12 +73,19 @@
   let sendError = $state('')
 
   $effect(() => {
-    key
-    fleet.ensureSession(key)
-    fleet.openSession(key)
-    // "#/session/<key>?move=1" opens the move panel (from the History page)
-    moving = new URLSearchParams(location.hash.split('?')[1] ?? '').get('move') === '1'
-    resumeMsg = ''
+    const sessionKey = key
+    // Initialize only when navigating to a session. Store updates and panel toggles
+    // must not reapply the URL defaults and close a panel the user just opened.
+    untrack(() => {
+      fleet.ensureSession(sessionKey)
+      fleet.openSession(sessionKey)
+      const params = new URLSearchParams(location.hash.split('?')[1] ?? '')
+      const openMove = params.get('move') === '1'
+      moving = openMove
+      moveTarget = params.get('target') ?? ''
+      if (openMove) detailsOpen = true
+      resumeMsg = ''
+    })
   })
 
   $effect(() => {
@@ -136,7 +154,11 @@
   <p class="notice muted">Loading session…</p>
 {:else}
   <div class="head">
-    <a class="back" href="#/">← Fleet</a>
+    <div class="head-nav">
+      <a class="back" href="#/">← Fleet</a>
+      {#if questionMessages.length}<button class="question-jump" onclick={showQuestion}>Latest question ↓</button>{/if}
+      <button class="details-toggle" aria-expanded={detailsOpen} aria-controls="session-details" onclick={() => (detailsOpen = !detailsOpen)}>{detailsOpen ? 'Hide details' : 'Details'}</button>
+    </div>
     <div class="title">
       {#if renaming}
         <form class="rename" onsubmit={(e) => { e.preventDefault(); saveTitle(newTitle) }}>
@@ -147,12 +169,14 @@
         </form>
       {:else}
         <span class="name">{displayName(session)}</span>
-        <button class="tbtn" title="Rename" onclick={() => { newTitle = displayName(session); renaming = true }}>✎</button>
+        {#if detailsOpen}<button class="tbtn" title="Rename" onclick={() => { newTitle = displayName(session); renaming = true }}>✎</button>
         <button class="tbtn" title="Generate a new title" disabled={titleBusy} onclick={regenerate}>{titleBusy ? '…' : '↻'}</button>
+        {/if}
       {/if}
-      <span class="muted small">{backendLabel(session)} on {session.machine}{session.kind === 'background' ? ' · background' : ''}</span>
+      {#if detailsOpen}<span class="muted small">{backendLabel(session)} on {session.machine}{session.kind === 'background' ? ' · background' : ''}</span>{/if}
     </div>
-    <div class={`state small ${session.status}`}>{statusLabel(session.status, session.waiting_for, !!x.goal)}</div>
+    <div class={`state small ${session.status}`} title={statusLabel(session.status, session.waiting_for, !!x.goal)}>{!detailsOpen ? `${session.machine} · ` : ''}{statusLabel(session.status, session.waiting_for, !!x.goal)}</div>
+    <div id="session-details" hidden={!detailsOpen}>
     <div class="cwd muted small">{x.title && session.name ? `${session.name} · ` : ''}{shortCwd(session.cwd)}</div>
     {#if x.goal}<div class="goal small"><b>Goal</b> {x.goal}{x.goal_tokens ? ` · ${(x.goal_tokens / 1e6).toFixed(1)}M tokens so far` : ''}</div>{/if}
     <div class="facts muted small">
@@ -166,12 +190,12 @@
     <div class="actrow">
       <SessionActions {session} />
       {#if resumable && !live}<button class="swbtn primary" onclick={resume} disabled={resumeMsg.startsWith('Resuming')}>Resume here</button>{/if}
-      {#if resumable}<button class="swbtn" onclick={() => { switching = !switching; if (switching) moving = false }}>{live ? 'Switch agent / model…' : 'Resume with another agent / model…'}</button>{/if}
+      {#if resumable}<button class="swbtn" onclick={() => { switching = !switching; if (switching) moving = false }}>{live ? 'Change mode / agent / model…' : 'Resume with mode / agent / model…'}</button>{/if}
       {#if resumable && elsewhere}<button class="swbtn" onclick={() => { moving = !moving; if (moving) switching = false }}>Move to another machine…</button>{/if}
     </div>
     {#if resumeMsg}<p class="small" class:okmsg={!resumeMsg.startsWith('Resuming') && resumeMsg.startsWith('Resumed')}>{resumeMsg}</p>{/if}
     {#if switching}{#key session.key}<SwitchPanel {session} onclose={() => (switching = false)} />{/key}{/if}
-    {#if moving}<MovePanel {session} onclose={() => (moving = false)} />{/if}
+    {#if moving}<MovePanel {session} target={moveTarget} onclose={() => (moving = false)} />{/if}
     <div class="tools small">
       <label><input type="checkbox" bind:checked={showExec} /> exec messages</label>
       <label><input type="checkbox" bind:checked={showThinking} /> thinking</label>
@@ -179,6 +203,7 @@
       {#if session.native_url}
         <a href={session.native_url} target="_blank" rel="noopener">Open in Claude app</a>
       {/if}
+    </div>
     </div>
   </div>
 
@@ -219,18 +244,31 @@
     padding: 10px 16px;
     display: grid;
     gap: 2px;
+    max-height: 55dvh;
+    overflow-y: auto;
   }
+  .head-nav { display: flex; align-items: center; gap: 8px; }
+  .head-nav button { font-size: 12px; padding: 4px 10px; min-height: 36px; }
+  .details-toggle { margin-left: auto; }
+  .question-jump { color: var(--amber); border-color: var(--amber); }
   .back { font-size: 13px; }
-  .title { display: flex; gap: 8px; align-items: baseline; }
-  .name { font-weight: 600; font-size: 17px; }
+  .title { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+  .name { font-weight: 600; font-size: 17px; overflow-wrap: anywhere; }
+  .state { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .state.waiting { color: var(--signal); font-weight: 500; }
   .state.busy { color: var(--cobalt); }
-  .tools { display: flex; gap: 14px; margin-top: 4px; color: var(--muted); }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 4px; color: var(--muted); }
   .tools label { display: inline-flex; gap: 4px; align-items: center; }
   .list { padding: 8px 0 16px; }
   .notice { padding: 16px; }
   .spin { display: inline-block; width: 11px; height: 11px; margin-right: 6px; border: 2px solid var(--hairline); border-top-color: var(--cobalt); border-radius: 50%; vertical-align: -1px; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  @media (max-width: 959px) {
+    .head { padding: 6px 12px; }
+    .name { font-size: 15px; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .head-nav button { min-height: 40px; }
+    .head:has([hidden]) .title { flex-wrap: nowrap; }
+  }
   @media (min-width: 960px) {
     /* the pane is a column: switcher and header take what they need, the transcript the rest */
     .sv { height: 100%; display: flex; flex-direction: column; }

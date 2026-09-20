@@ -48,6 +48,11 @@ def read(screen: str) -> dict[str, Any]:
         return out
     if "trust this folder" in low or "do you trust" in low:
         out["stage"] = "trust"
+        out["options"] = [
+            {"n": int(m.group(1)), "label": m.group(2), "chosen": "❯" in line or ">" in line}
+            for line in lines[-30:]
+            if (m := _OPTION.match(line))
+        ]
         return out
     url = _url(lines[-80:])
     if url:

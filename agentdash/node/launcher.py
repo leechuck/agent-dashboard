@@ -24,6 +24,7 @@ from typing import Any
 from ..config import Settings
 from ..install.account import link_shared
 from .adapters.claude_cli import start_background
+from .adapters.tmux_keys import TmuxSendError, capture, send_keys, type_prompt
 
 HARNESSES = ("claude", "codex", "pi", "opencode")
 PERMISSIONS = ("default", "plan", "acceptEdits", "bypass")
@@ -72,10 +73,17 @@ class LaunchSpec:
     permissions: str = "default"
     mode: str = "tmux"  # tmux | background (Claude only)
     resume: str = ""  # session id to continue
+    create_dir: bool = False
+    work_mode: str = ""  # configured | plan | implement; separate from process mode
 
     @classmethod
     def parse(cls, raw: dict[str, Any]) -> LaunchSpec:
-        spec = cls(**{k: str(raw[k]) for k in cls.__dataclass_fields__ if raw.get(k)})
+        spec = cls(
+            **{k: str(raw[k]) for k in cls.__dataclass_fields__ if k != "create_dir" and raw.get(k)}
+        )
+        if "create_dir" in raw and not isinstance(raw["create_dir"], bool):
+            raise LaunchError("create_dir must be a boolean")
+        spec.create_dir = raw.get("create_dir", False)
         if raw.get("config_dir") and not spec.login:  # older clients
             spec.backend, spec.login = "login", str(raw["config_dir"])
         if raw.get("permission_mode") and spec.permissions == "default":
@@ -84,7 +92,19 @@ class LaunchSpec:
             raise LaunchError(f"unknown harness {spec.harness}")
         if spec.permissions not in PERMISSIONS:
             raise LaunchError(f"unknown permission mode {spec.permissions}")
+        if spec.work_mode not in ("", "plan", "implement"):
+            raise LaunchError(f"unknown work mode {spec.work_mode}")
+        if spec.work_mode and spec.harness not in ("claude", "codex", "opencode"):
+            raise LaunchError(f"mode selection is not supported for {spec.harness}")
         return spec
+
+
+def claude_permissions(spec: LaunchSpec) -> str:
+    if spec.work_mode == "plan":
+        return "plan"
+    if spec.work_mode == "implement" and spec.permissions in ("default", "plan"):
+        return "default"
+    return spec.permissions
 
 
 def secret(s: Settings, name: str) -> str:
@@ -196,15 +216,18 @@ def build(
             argv += ["--model", spec.model]
         if spec.effort:
             argv += ["--effort", spec.effort]
-        if spec.permissions == "bypass":
+        permissions = claude_permissions(spec)
+        if permissions == "bypass":
             argv.append("--dangerously-skip-permissions")
-        elif spec.permissions != "default":
-            argv += ["--permission-mode", spec.permissions]
+        elif permissions != "default" or spec.work_mode:
+            argv += ["--permission-mode", permissions]
         if spec.name:
             argv += ["--name", spec.name]
     elif spec.harness == "codex":
         if spec.resume:
             argv += ["resume", spec.resume]
+            if spec.cwd:
+                argv += ["--cd", spec.cwd]
         if spec.backend == "endpoint":
             ep, key = _endpoint(spec, endpoints, s)
             p = f"model_providers.{ep.id}"
@@ -242,9 +265,17 @@ def build(
             raise LaunchError("opencode takes its endpoints from its own config file")
         if spec.model:
             argv += ["-m", spec.model]
+        if spec.resume:
+            argv += ["--session", spec.resume]
+        if spec.work_mode:
+            argv += ["--agent", "plan" if spec.work_mode == "plan" else "build"]
         if spec.prompt:
             argv += ["--prompt", spec.prompt]
-    if spec.prompt and spec.harness != "opencode":
+    if (
+        spec.prompt
+        and spec.harness != "opencode"
+        and not (spec.harness == "codex" and spec.work_mode)
+    ):
         argv.append(spec.prompt)
     return argv, env
 
@@ -304,13 +335,25 @@ def session_name(spec: LaunchSpec) -> str:
     return f"{spec.harness}-{base}-{secrets.token_hex(2)}"
 
 
-async def launch(spec: LaunchSpec, s: Settings, endpoints: list[Endpoint]) -> dict[str, Any]:
+async def launch(
+    spec: LaunchSpec, s: Settings, endpoints: list[Endpoint],
+    *, runtime_home: Path | None = None,
+) -> dict[str, Any]:
+    if not spec.cwd.strip():
+        raise LaunchError("a directory is required")
     cwd = Path(spec.cwd).expanduser()
+    if spec.create_dir:
+        try:
+            cwd.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise LaunchError(f"cannot create directory {cwd}: {e.strerror or e}") from e
     if not cwd.is_dir():
-        raise LaunchError(f"no such directory: {spec.cwd}")
+        raise LaunchError(f"no such directory: {spec.cwd}; select Create directory if missing")
     if not spec.prompt and not spec.resume and spec.mode == "background":
         raise LaunchError("a background job needs a task")
     argv, env = build(spec, s, endpoints)
+    if runtime_home is not None:
+        env["CLAUDE_CONFIG_DIR" if spec.harness == "claude" else "CODEX_HOME"] = str(runtime_home)
     if spec.harness == "claude" and env.get("CLAUDE_CONFIG_DIR"):
         carry_trust(str(cwd), Path(env["CLAUDE_CONFIG_DIR"]))
     if spec.harness == "claude" and spec.mode == "background":
@@ -319,7 +362,13 @@ async def launch(spec: LaunchSpec, s: Settings, endpoints: list[Endpoint]) -> di
             spec.prompt,
             name=spec.name,
             resume=spec.resume,
-            permission_mode="" if spec.permissions in ("default", "bypass") else spec.permissions,
+            permission_mode=(
+                "bypassPermissions"
+                if claude_permissions(spec) == "bypass"
+                else claude_permissions(spec)
+                if spec.work_mode or spec.permissions != "default"
+                else ""
+            ),
             config_dir=env.get("CLAUDE_CONFIG_DIR"),
             model="" if spec.backend == "endpoint" else spec.model,
             env_extra={k: v for k, v in env.items() if k != "CLAUDE_CONFIG_DIR"},
@@ -347,8 +396,59 @@ async def launch(spec: LaunchSpec, s: Settings, endpoints: list[Endpoint]) -> di
     if proc.returncode != 0:
         env_file.unlink(missing_ok=True)
         raise LaunchError(err.decode().strip()[:300] or "tmux could not start the session")
-    return {
+    result = {
         "ok": True,
         "tmux": {"name": name, "socket": "default", "target": f"{name}:0.0"},
         "attach": f"tmux attach -t {name}",
     }
+    if spec.harness == "codex" and spec.work_mode:
+        try:
+            await set_codex_mode("default", f"{name}:0.0", spec.work_mode, wait=True)
+            if spec.prompt:
+                await type_prompt("default", f"{name}:0.0", spec.prompt)
+        except (TmuxSendError, OSError, TimeoutError) as e:
+            result["warning"] = (
+                f"Session opened, but the task was not sent: {e}. "
+                "Open its terminal to finish setup, select the mode, then send your task."
+            )
+    return result
+
+
+async def set_codex_mode(socket: str, target: str, mode: str, *, wait: bool = False) -> None:
+    """Change the actual TUI mode before delivering a task; never send into setup dialogs."""
+    if mode not in ("plan", "implement"):
+        raise TmuxSendError("unknown Codex mode")
+
+    def read_mode(screen: str) -> bool | None:
+        # Read below the final composer, never a mention of Plan mode in the transcript.
+        lines = screen.rstrip().splitlines()
+        prompts = [i for i, line in enumerate(lines) if line.lstrip().startswith("›")]
+        if not prompts:
+            return None
+        footer = "\n".join(lines[prompts[-1] + 1 :]).lower()
+        if "esc to interrupt" in footer:
+            return None
+        if not any(
+            marker in footer for marker in ("context left", "for agents", "? for shortcuts")
+        ):
+            return None
+        return "plan mode" in footer
+
+    for _ in range(40 if wait else 1):
+        planning = read_mode(await capture(socket, target))
+        if planning is not None:
+            break
+        await asyncio.sleep(0.5)
+    else:
+        raise TmuxSendError("Codex is not at its prompt (it may need trust or login)")
+    if planning == (mode == "plan"):
+        return
+    if mode == "plan":
+        await type_prompt(socket, target, "/plan")
+    else:
+        await send_keys(socket, target, ["BTab"])
+    for _ in range(20):
+        await asyncio.sleep(0.2)
+        if read_mode(await capture(socket, target)) == (mode == "plan"):
+            return
+    raise TmuxSendError("Codex did not confirm the requested mode")

@@ -60,6 +60,8 @@
     value.harness = h
     value.backend = 'default'
     value.login = value.endpoint = value.model = value.effort = ''
+    value.work_mode = ''
+    value.permissions = 'default'
     custom = false
   }
 </script>
@@ -94,12 +96,22 @@
       </select>
     </label>
   {/if}
+  {#if ['claude', 'codex', 'opencode'].includes(value.harness)}
+    <label>Mode
+      <select value={value.work_mode ?? ''} onchange={(e) => { value.work_mode = e.currentTarget.value as AgentChoice['work_mode']; if (value.permissions === 'plan') value.permissions = 'default' }}>
+        <option value="">As configured</option>
+        <option value="plan">Planning</option>
+        <option value="implement">Implementation</option>
+      </select>
+    </label>
+  {:else}
+    <p class="small muted">This agent has no built-in planning mode available here.</p>
+  {/if}
   {#if value.harness === 'claude' || value.harness === 'codex'}
-    <label>May act
-      <select bind:value={value.permissions}>
+    <label>Permissions
+      <select bind:value={value.permissions} disabled={value.work_mode === 'plan' && value.harness === 'claude'}>
         <option value="default">as configured</option>
         {#if value.harness === 'claude'}
-          <option value="plan">plan only</option>
           <option value="acceptEdits">edit files, ask for the rest</option>
         {/if}
         <option value="bypass">without asking (bypass)</option>

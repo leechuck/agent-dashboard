@@ -13,10 +13,11 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
+from ..transfer_limits import MAX_BYTES, require_space
+
 router = APIRouter(prefix="/nodes/blob")
 
 _ID = re.compile(r"^[a-f0-9]{16,64}$")
-MAX_BYTES = 2 * 1024**3
 
 
 def _dir(request: Request) -> Path:
@@ -43,6 +44,38 @@ def remove(state_dir: Path, blob_id: str) -> None:
 @router.put("/{blob_id}")
 async def upload(blob_id: str, request: Request):
     path = _check(request, blob_id)
+    content_range = request.headers.get("content-range")
+    if content_range:
+        match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", content_range)
+        if not match:
+            raise HTTPException(400, "bad content range")
+        start, end, total = map(int, match.groups())
+        if not 0 <= start <= end < total <= MAX_BYTES or end - start >= 4 * 1024**2:
+            raise HTTPException(413, "invalid or oversized chunk")
+        data = bytearray()
+        async for chunk in request.stream():
+            data.extend(chunk)
+            if len(data) > end - start + 1:
+                raise HTTPException(400, "chunk length mismatch")
+        if len(data) != end - start + 1:
+            raise HTTPException(400, "incomplete chunk")
+        # No awaits between checking the offset and committing this small chunk.
+        # A repeated request after a lost response is idempotent.
+        size = path.stat().st_size if path.exists() else 0
+        if size == end + 1:
+            with path.open("rb") as f:
+                f.seek(start)
+                if f.read(len(data)) == data:
+                    return {"ok": True, "size": size}
+        if size != start:
+            raise HTTPException(409, f"expected upload offset {size}")
+        try:
+            require_space(path, total - start)
+        except OSError as e:
+            raise HTTPException(507, str(e)) from e
+        with path.open("ab") as f:
+            f.write(data)
+        return {"ok": True, "size": end + 1}
     size = 0
     with path.open("wb") as f:
         async for chunk in request.stream():
@@ -51,6 +84,10 @@ async def upload(blob_id: str, request: Request):
                 f.close()
                 path.unlink(missing_ok=True)
                 raise HTTPException(413, "bundle too large")
+            try:
+                require_space(path, len(chunk))
+            except OSError as e:
+                raise HTTPException(507, str(e)) from e
             f.write(chunk)
     return {"ok": True, "size": size}
 

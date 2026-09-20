@@ -24,6 +24,10 @@
   --terminal-selection: #cbd9f6;
   --code-bg: #edf0f3;
   --code-fg: #1a222b;
+  --text-link: var(--cobalt);
+  --text-code: var(--cobalt);
+  --text-file: var(--cobalt);
+  --text-emphasis: inherit;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -91,6 +95,11 @@
   --terminal-selection: #165216;
   --code-bg: #000000;
   --code-fg: #00ff00;
+  /* Bright Tango colours from Terminator's default ANSI palette. */
+  --text-link: #34e2e2;
+  --text-code: #fce94f;
+  --text-file: #729fcf;
+  --text-emphasis: #ad7fa8;
   --mono: 'Noto Sans Mono', 'IBM Plex Mono', ui-monospace, monospace;
 }
 
@@ -104,7 +113,7 @@ body {
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
 }
-a { color: var(--cobalt); text-decoration: none; }
+a { color: var(--text-link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 button, input, textarea { font: inherit; color: inherit; }
 button {
@@ -121,6 +130,10 @@ button.danger { color: var(--signal); border-color: var(--signal); }
 button:disabled { opacity: .5; cursor: default; }
 :focus-visible { outline: 2px solid var(--cobalt); outline-offset: 2px; }
 code, pre, .mono { font-family: var(--mono); font-size: 13px; }
+code { color: var(--text-code); }
+pre code { color: inherit; }
+:root[data-theme='terminator'] :is(.md, .report) :is(strong, em) { color: var(--text-emphasis); }
+:root[data-theme='terminator'] .file-path { color: var(--text-file); }
 pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }

@@ -241,7 +241,11 @@ class ClaudeCollector:
                 cwd = a.get("cwd", "")
                 if cwd == internal:
                     continue
-                tpath = self._transcripts.get(sid) or find_transcript(config_dir, sid, cwd)
+                tpath = self._transcripts.get(sid)
+                if not tpath or not tpath.resolve().is_relative_to(
+                    (config_dir / "projects").resolve()
+                ):
+                    tpath = find_transcript(config_dir, sid, cwd)
                 if tpath:
                     self._transcripts[sid] = tpath
                 extra: dict[str, Any] = {"config_dir": str(config_dir)}

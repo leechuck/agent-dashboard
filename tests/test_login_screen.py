@@ -56,3 +56,10 @@ def test_trust_and_success_are_recognised():
 
 def test_the_first_start_theme_question_is_recognised():
     assert login_screen.read(THEME)["stage"] == "theme"
+
+
+def test_trust_options_preserve_the_actual_selected_choice():
+    screen = "Do you trust this folder?\n❯ 1. No, exit\n  2. Yes, I trust this folder"
+    options = login_screen.read(screen)["options"]
+    assert options[0] == {"n": 1, "label": "No, exit", "chosen": True}
+    assert options[1] == {"n": 2, "label": "Yes, I trust this folder", "chosen": False}

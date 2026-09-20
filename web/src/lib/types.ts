@@ -322,6 +322,7 @@ export interface AgentChoice {
   model: string
   effort: string
   permissions: string
+  work_mode?: '' | 'plan' | 'implement'
 }
 
 export interface SlashCommand {

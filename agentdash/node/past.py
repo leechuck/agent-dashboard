@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import tarfile
 from pathlib import Path
 from typing import Any
@@ -119,6 +120,47 @@ def _claude_facts(path: Path) -> dict[str, Any]:
     return facts
 
 
+MOVE_RECORD = "agentdash-move.json"
+
+
+def record_move(root: Path, sid: str, cwd: str) -> None:
+    """Remember where a moved session works now.
+
+    Claude transcripts and Codex thread rows keep the cwd of the machine the session came
+    from, and Codex leaves it there even when resumed with `--cd`. Several sessions can
+    move into one store, so the record keeps every session; the top-level fields stay for
+    nodes that read the older single-session form.
+    """
+    path = root / MOVE_RECORD
+    moves: dict[str, str] = {}
+    try:
+        old = json.loads(path.read_text())
+        if isinstance(old.get("moves"), dict):
+            moves = {str(k): str(v) for k, v in old["moves"].items()}
+        if old.get("session_id") and old.get("cwd"):
+            moves.setdefault(str(old["session_id"]), str(old["cwd"]))
+    except (OSError, ValueError, AttributeError):
+        pass
+    moves[sid] = cwd
+    path.write_text(json.dumps({"session_id": sid, "cwd": cwd, "moves": moves}))
+
+
+def relocated_cwd(root: Path, sid: str, fallback: str) -> str:
+    """The directory a session was moved into, if it was; else what the harness says."""
+    try:
+        move = json.loads((root / MOVE_RECORD).read_text())
+        cwd = None
+        if isinstance(move.get("moves"), dict):
+            cwd = move["moves"].get(sid)
+        if cwd is None and move.get("session_id") == sid:
+            cwd = move.get("cwd", "")
+        if cwd and Path(cwd).is_absolute():
+            return str(cwd)
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return fallback
+
+
 def claude_session(machine: str, config_dir: Path, path: Path) -> Session | None:
     facts = _claude_facts(path)
     if not facts:
@@ -140,7 +182,7 @@ def claude_session(machine: str, config_dir: Path, path: Path) -> Session | None
         provider=acct["provider"],
         session_id=sid,
         name=name,
-        cwd=facts.get("cwd", ""),
+        cwd=relocated_cwd(config_dir, sid, facts.get("cwd", "")),
         status=SessionStatus.done,
         started_at=facts.get("started"),
         updated_at=facts["mtime"],
@@ -150,7 +192,7 @@ def claude_session(machine: str, config_dir: Path, path: Path) -> Session | None
     )
 
 
-def list_claude(machine: str, config_dirs: list[Path], limit: int) -> list[Session]:
+def list_claude(machine: str, config_dirs: list[Path], limit: int | None) -> list[Session]:
     """Newest transcripts first. Logins that share `projects/` are read once."""
     found: list[tuple[int, Path, Path]] = []
     seen_projects: set[Path] = set()
@@ -184,7 +226,7 @@ def list_claude(machine: str, config_dirs: list[Path], limit: int) -> list[Sessi
         s = claude_session(machine, d, f)
         if s and (s.cwd or s.extra.get("first_user")):
             out.append(s)
-        if len(out) >= limit:
+        if limit is not None and len(out) >= limit:
             break
     return out
 
@@ -195,7 +237,7 @@ def list_claude(machine: str, config_dirs: list[Path], limit: int) -> list[Sessi
 def codex_session(machine: str, t: dict[str, Any], codex_home: Path) -> Session:
     first = " ".join(str(t.get("first_user_message") or "").split())[:300]
     name = t.get("name") or t.get("title") or first[:72] or Path(t.get("cwd") or "codex").name
-    extra: dict[str, Any] = {"codex_home": str(codex_home), "past": True}
+    extra: dict[str, Any] = {"codex_home": t.get("codex_home") or str(codex_home), "past": True}
     if first:
         extra["first_user"] = first
     if t.get("title"):
@@ -207,7 +249,7 @@ def codex_session(machine: str, t: dict[str, Any], codex_home: Path) -> Session:
         provider="openai",
         session_id=str(t["id"]),
         name=str(name)[:72],
-        cwd=str(t.get("cwd") or ""),
+        cwd=relocated_cwd(Path(extra["codex_home"]), str(t["id"]), str(t.get("cwd") or "")),
         status=SessionStatus.done,
         started_at=t.get("created_at_ms"),
         updated_at=int(t.get("updated_at_ms") or 0),
@@ -254,7 +296,7 @@ def pi_session_at(machine: str, path: Path) -> Session | None:
     )
 
 
-def list_pi(machine: str, sessions_dir: Path, limit: int) -> list[Session]:
+def list_pi(machine: str, sessions_dir: Path, limit: int | None) -> list[Session]:
     if not sessions_dir.is_dir():
         return []
     files = []
@@ -291,9 +333,74 @@ def matches(s: Session, q: str) -> bool:
     if not q:
         return True
     hay = " ".join(
-        str(x) for x in (s.name, s.cwd, s.session_id, s.extra.get("first_user", ""), s.model)
+        str(x)
+        for x in (
+            s.name,
+            s.cwd,
+            s.session_id,
+            s.extra.get("first_user", ""),
+            s.extra.get("title", ""),
+            s.model,
+        )
     ).lower()
     return all(word in hay for word in q.split())
+
+
+def search_sessions(sessions, query, live, titles, content=False):
+    """Filter the full archive before pagination; optionally scan conversation text."""
+    result = []
+    seen = set()
+    for session in sorted(sessions, key=lambda s: -s.updated_at):
+        if session.key in live or session.key in seen:
+            continue
+        seen.add(session.key)
+        if titles.get(session.key):
+            session.extra["title"] = titles[session.key]
+        if matches(session, query):
+            result.append(session)
+        elif content and query.strip():
+            snippet = content_match(Path(session.transcript_path), query)
+            if snippet:
+                session.extra["search_excerpt"] = snippet
+                result.append(session)
+    return result
+
+
+def content_match(path: Path, query: str) -> str:
+    """Search decoded text, including escaped Unicode, without loading a whole log."""
+    remaining = set(query.casefold().split())
+    snippet = ""
+
+    def texts(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in ("text", "content", "message", "summary") and isinstance(item, str):
+                    yield item
+                elif isinstance(item, (dict, list)):
+                    yield from texts(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from texts(item)
+
+    try:
+        with path.open(encoding="utf-8", errors="replace") as source:
+            for line in source:
+                try:
+                    record = json.loads(line)
+                except (ValueError, RecursionError):
+                    continue
+                for text in texts(record):
+                    folded = text.casefold()
+                    hits = {word for word in remaining if word in folded}
+                    if hits:
+                        at = min(folded.index(word) for word in hits)
+                        snippet = snippet or " ".join(text[max(0, at - 80) : at + 220].split())
+                        remaining -= hits
+                    if not remaining:
+                        return snippet
+    except OSError:
+        pass
+    return ""
 
 
 # ---- moving a session between machines -------------------------------------------
@@ -303,7 +410,7 @@ def _safe_member(name: str) -> bool:
     return bool(name) and not name.startswith("/") and ".." not in Path(name).parts
 
 
-def pack(sess: Session, out_dir: Path) -> tuple[Path, dict[str, Any]]:
+def pack(sess: Session, out_dir: Path, environment: bool = False) -> tuple[Path, dict[str, Any]]:
     """Bundle what another machine needs to resume this session: the transcript and, for
     Claude, the folder of sub-agent transcripts next to it."""
     if sess.harness not in RESUMABLE:
@@ -312,20 +419,35 @@ def pack(sess: Session, out_dir: Path) -> tuple[Path, dict[str, Any]]:
     if not src.is_file():
         raise TransferError("this session has no transcript file to move")
     out_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    bundle = out_dir / f"{sess.harness}-{sess.session_id}.tgz"
-    with tarfile.open(bundle, "w:gz") as tar:
-        if sess.harness == "claude":
-            tar.add(src, arcname=src.name)
-            side = src.with_suffix("")
-            if side.is_dir():
-                tar.add(side, arcname=side.name)
-        elif sess.harness == "codex":
-            root = Path(sess.extra.get("codex_home") or Path.home() / ".codex") / "sessions"
-            rel = src.relative_to(root) if src.is_relative_to(root) else Path(src.name)
-            tar.add(src, arcname=str(rel))
-        else:
-            tar.add(src, arcname=src.name)
+    bundle = out_dir / f"{sess.harness}-{secrets.token_hex(16)}.tgz"
+    try:
+        with tarfile.open(bundle, "w:gz", compresslevel=1) as tar:
+            if sess.harness == "claude":
+                tar.add(src, arcname=src.name)
+                side = src.with_suffix("")
+                if side.is_dir():
+                    tar.add(side, arcname=side.name)
+            elif sess.harness == "codex":
+                root = Path(sess.extra.get("codex_home") or Path.home() / ".codex") / "sessions"
+                rel = src.relative_to(root) if src.is_relative_to(root) else Path(src.name)
+                tar.add(src, arcname=str(rel))
+            else:
+                tar.add(src, arcname=src.name)
+            if environment:
+                from . import workspace_transfer
+
+                agent_home = Path(
+                    sess.extra.get("config_dir" if sess.harness == "claude" else "codex_home")
+                    or Path.home() / (".claude" if sess.harness == "claude" else ".codex")
+                )
+                workspace_transfer.add(
+                    tar, Path(sess.cwd), Path.home(), str(sess.harness), agent_home
+                )
+    except BaseException:
+        bundle.unlink(missing_ok=True)
+        raise
     meta = {
+        "environment": environment,
         "harness": str(sess.harness),
         "session_id": sess.session_id,
         "cwd": sess.cwd,
@@ -336,7 +458,9 @@ def pack(sess: Session, out_dir: Path) -> tuple[Path, dict[str, Any]]:
     return bundle, meta
 
 
-def unpack(bundle: Path, harness: str, sid: str, cwd: str, root: Path) -> Path:
+def unpack(
+    bundle: Path, harness: str, sid: str, cwd: str, root: Path, *, check_only: bool = False
+) -> Path:
     """Put a bundle where the harness on this machine looks for it, and return the
     transcript's new path. `root` is the Claude config dir, the Codex home, or pi's
     sessions folder."""
@@ -354,17 +478,32 @@ def unpack(bundle: Path, harness: str, sid: str, cwd: str, root: Path) -> Path:
         target = None
     else:
         raise TransferError(f"{harness} sessions cannot move")
-    dest.mkdir(parents=True, exist_ok=True)
     with tarfile.open(bundle, "r:gz") as tar:
         members = [m for m in tar.getmembers() if _safe_member(m.name) and ok(m.name)]
-        if not members:
+        files = [m for m in members if m.isfile()]
+        if not files:
             raise TransferError("the bundle holds no transcript for this session")
+        if target is None:
+            target = dest / next(m.name for m in files if m.name.endswith(".jsonl"))
+        if not any(dest / m.name == target for m in files):
+            raise TransferError("the bundle holds no main transcript for this session")
+        for m in files:
+            existing = dest / m.name
+            if existing.exists():
+                import hashlib
+
+                with existing.open("rb") as old, tar.extractfile(m) as new:
+                    if (
+                        hashlib.file_digest(old, "sha256").digest()
+                        != hashlib.file_digest(new, "sha256").digest()
+                    ):
+                        raise TransferError(f"destination has a different transcript: {existing}")
+        if check_only:
+            return target
+        dest.mkdir(parents=True, exist_ok=True)
         for m in members:
-            if not (m.isfile() or m.isdir()):
-                continue
-            tar.extract(m, dest, filter="data")
-            if target is None and m.isfile() and m.name.endswith(".jsonl"):
-                target = dest / m.name
-    if target is None or not target.is_file():
+            if m.isfile() or m.isdir():
+                tar.extract(m, dest, filter="data")
+    if not target.is_file():
         raise TransferError("the transcript did not arrive")
     return target

@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from ...models import Harness, Session, SessionStatus, now_ms
 from ..adapters.codex_rollout import scan_status
+from ..past import relocated_cwd
 from . import procs
 
 log = logging.getLogger(__name__)
@@ -51,22 +53,27 @@ class CodexCollector:
         "first_user_message, reasoning_effort, source, agent_nickname, agent_role"
     )
 
-    def _query(self, where: str, args: tuple) -> list[dict]:
-        if not self.state_db.exists():
-            return []
-        try:
-            c = sqlite3.connect(f"file:{self.state_db}?mode=ro", uri=True, timeout=2)
-            c.row_factory = sqlite3.Row
-            rows = c.execute(
-                f"SELECT {self._COLS} FROM threads WHERE {where} "
-                "ORDER BY updated_at_ms DESC LIMIT 200",
-                args,
-            ).fetchall()
-            c.close()
-            return [dict(r) for r in rows]
-        except sqlite3.Error as e:
-            log.warning("codex state db: %s", e)
-            return []
+    def _query(self, where: str, args: tuple, limit: int | None = 200) -> list[dict]:
+        homes = [self.home, *sorted(self.home.parent.glob(".codex-move-*"))]
+        result = []
+        for home in dict.fromkeys(homes):
+            db = home / "state_5.sqlite"
+            if not db.exists():
+                continue
+            try:
+                with closing(sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)) as c:
+                    c.row_factory = sqlite3.Row
+                    rows = c.execute(
+                        f"SELECT {self._COLS} FROM threads WHERE {where} "
+                        "ORDER BY updated_at_ms DESC"
+                        + (f" LIMIT {int(limit)}" if limit is not None else ""),
+                        args,
+                    ).fetchall()
+                    result.extend({**dict(r), "codex_home": str(home)} for r in rows)
+            except sqlite3.Error as e:
+                log.warning("codex state db: %s", e)
+        result.sort(key=lambda r: -int(r.get("updated_at_ms") or 0))
+        return result[:limit]
 
     def _threads(self, since_ms: int) -> list[dict]:
         return self._query("updated_at_ms >= ?", (since_ms,))
@@ -110,11 +117,15 @@ class CodexCollector:
         now = now_ms()
         threads = self._threads(now - 6 * 3600 * 1000)
         running = self._running()
-        by_id = {t["id"]: t for t in threads}
+        by_id = {}
+        for t in threads:
+            by_id.setdefault(t["id"], t)
         sessions: list[Session] = []
         used_threads: set[str] = set()
 
-        def make(t: dict, pid: int | None, kind: str, started: int | None) -> Session:
+        def make(
+            t: dict, pid: int | None, kind: str, started: int | None, process_cwd: str = ""
+        ) -> Session:
             path = Path(t["rollout_path"]) if t.get("rollout_path") else None
             info = scan_status(iter(_tail_lines(path))) if path and path.exists() else {}
             status = SessionStatus.busy if info.get("busy") else SessionStatus.idle
@@ -138,7 +149,12 @@ class CodexCollector:
                 or (t.get("first_user_message") or "")[:60]
                 or Path(t.get("cwd") or info.get("cwd", "") or "codex").name
             )
-            extra: dict = {"codex_home": str(self.home)}
+            extra: dict = {"codex_home": t.get("codex_home") or str(self.home)}
+            # The thread row keeps the cwd the session started with, even after a move
+            # resumed it elsewhere with `--cd`: the process, then the move record, know.
+            cwd = process_cwd or relocated_cwd(
+                Path(extra["codex_home"]), t["id"], t.get("cwd") or info.get("cwd", "")
+            )
             if info.get("last_user"):
                 self._last_user[t["id"]] = info["last_user"]
             if self._last_user.get(t["id"]):
@@ -166,7 +182,7 @@ class CodexCollector:
                 provider="openai",
                 session_id=t["id"],
                 name=str(name)[:72],
-                cwd=t.get("cwd") or info.get("cwd", ""),
+                cwd=cwd,
                 kind=kind,  # type: ignore[arg-type]
                 status=status,
                 pid=pid,
@@ -187,7 +203,10 @@ class CodexCollector:
                 continue
             used_threads.add(t["id"])
             sessions.append(
-                make(t, pid, "headless" if r["headless"] else "interactive", r["started"])
+                make(
+                    t, pid, "headless" if r["headless"] else "interactive", r["started"],
+                    process_cwd=r["cwd"],
+                )
             )
         for t in threads:
             if t["id"] in used_threads:
@@ -195,4 +214,5 @@ class CodexCollector:
             if int(t.get("updated_at_ms") or 0) < now - 2 * 3600 * 1000:
                 continue
             sessions.append(make(t, None, "unknown", None))
+            used_threads.add(t["id"])
         return sessions

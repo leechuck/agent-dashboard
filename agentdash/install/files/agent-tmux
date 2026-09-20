@@ -4,9 +4,30 @@
 # show its terminal. Inside tmux already, it just runs the command.
 #
 #   agent-tmux codex            agent-tmux claude --resume
+#   agent-tmux codex resume --dangerously-bypass-approvals-and-sandbox
+#   agent-tmux codex resume --last --dangerously-bypass-approvals-and-sandbox
 #   alias codex='agent-tmux codex'   (see `agentdash install launcher`)
 set -euo pipefail
 [ $# -ge 1 ] || { echo "usage: agent-tmux <command> [args...]" >&2; exit 2; }
+# Accept the common single-dash spelling of this explicitly requested Codex option.
+# Keep every other argument intact, including literal text after --.
+if [ "$(basename "$1")" = codex ]; then
+  args=("$1")
+  shift
+  literal=false
+  for arg in "$@"; do
+    if [ "$literal" = false ]; then
+      case "$arg" in
+        --) literal=true ;;
+        -dangerously-bypass-approvals-and-sandbox)
+          arg=--dangerously-bypass-approvals-and-sandbox
+          echo "agent-tmux: using --dangerously-bypass-approvals-and-sandbox (two hyphens)" >&2 ;;
+      esac
+    fi
+    args+=("$arg")
+  done
+  set -- "${args[@]}"
+fi
 if [ -n "${TMUX:-}" ] || ! command -v tmux >/dev/null; then exec "$@"; fi
 name="$(basename "$1")-$(basename "$PWD" | tr -c 'A-Za-z0-9_-' '_')-$$"
 # -e hands the agent this shell's environment for the variables that matter to it

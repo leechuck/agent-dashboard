@@ -262,3 +262,50 @@ async def test_group_review_uses_private_sources_and_saves_validated_result(pa, 
     invalid = await pa.handle({'op': 'ask', 'topic': 'group', 'member': '../secret',
                                'question': 'Assess progress'}, {})
     assert not invalid['ok']
+
+
+async def test_briefing_launches_local_pa_with_draft_workflow(pa, monkeypatch):
+    seen = {}
+
+    async def start(cwd, prompt, **kwargs):
+        seen.update(cwd=cwd, prompt=prompt, **kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr("agentdash.node.pa.start_background", start)
+    assert (await pa.run({}, "Focus on unanswered student mail"))["ok"]
+    assert seen["cwd"] == str(pa.dir)
+    assert seen["name"] == "pa-briefing"
+    assert "received AND sent mail" in seen["prompt"]
+    assert "leave each draft open and UNSENT" in seen["prompt"]
+    assert "Focus on unanswered student mail" in seen["prompt"]
+    assert "Do not create reminders, tasks, contact" not in seen["prompt"]
+
+
+@pytest.mark.parametrize("online", [False, True])
+async def test_pa_requests_stay_on_configured_laptop(monkeypatch, online):
+    from types import SimpleNamespace
+
+    from agentdash.hub import api
+
+    calls = []
+
+    async def settings(request):
+        return {"personal": {"machine": "laptop"}}
+
+    async def request(node, kind, payload, timeout):
+        calls.append(node)
+        return {"ok": True}
+
+    nodes = {"server": "server-connection"}
+    if online:
+        nodes["laptop"] = "laptop-connection"
+    hub = SimpleNamespace(nodes=nodes, request=request)
+    req = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(hub=hub)))
+    monkeypatch.setattr(api, "_agents", settings)
+    result = await api._pa(req, {"op": "get"})
+    if online:
+        assert result["ok"] and result["machine"] == "laptop"
+        assert calls == ["laptop-connection"]
+    else:
+        assert not result["ok"] and "laptop is offline" in result["error"]
+        assert calls == []
