@@ -341,6 +341,21 @@ class Node:
             {"session_key": key, "messages": [m.model_dump() for m in initial], "reset": True},
         )
 
+    async def _show_queued(self, key: str, text: str, request_id: str) -> None:
+        """The agent takes a message between turns; a dialog or a long turn can hold it for
+        a while. Show it now so the board does not look deaf; the transcript's own record
+        replaces it once the agent has read it."""
+        queued = Message(
+            id=f"pending:{request_id or secrets.token_hex(8)}",
+            ts=now_ms(),
+            role="user",
+            kind="text",
+            text=text,
+            sender="dashboard",
+            pending=True,
+        )
+        await self.hub.send(NODE_MESSAGES, {"session_key": key, "messages": [queued.model_dump()]})
+
     @staticmethod
     def _has_inbox(sess: Session | None) -> bool:
         if sess is None:
@@ -354,14 +369,20 @@ class Node:
         sess = self.sessions.get(key)
         result: dict[str, Any] = {"session_key": key, "request_id": request_id, "ok": False}
         pane = (sess.extra.get("tmux") or {}) if sess else {}
-        # a slash command only works when typed; the inbox socket delivers it as plain text
-        typed = bool(pane) and (text.startswith("/") or not self._has_inbox(sess))
+        # Typed into its terminal whenever it has one: that is the owner speaking, and the
+        # agent answers the owner. The inbox socket wraps a message as one from another
+        # Claude session ("not typed by your user"), the agent then reports back to a peer
+        # (any other session on the host) and that session starts working on it. Slash
+        # commands only work typed anyway.
+        typed = bool(pane)
         if not sess:
             result["error"] = "unknown session"
         elif typed:
             try:
                 await type_prompt(pane.get("socket", ""), pane.get("target", ""), text)
                 result.update(ok=True, via="tmux")
+                # a busy agent, or one at a dialog, takes the text later: show it queued
+                await self._show_queued(key, text, request_id)
             except TmuxSendError as e:
                 result["error"] = str(e)
         elif text.startswith("/") and sess.harness == "claude":
@@ -375,21 +396,7 @@ class Node:
                     sender=f"agentdash@{self.machine}",
                 )
                 result.update(ok=True, reply=reply)
-                # Claude reads its inbox between turns; a dialog or a long turn can hold the
-                # message for a while. Show it now so the board does not look deaf; the real
-                # record replaces it when the transcript has it.
-                queued = Message(
-                    id=f"pending:{request_id or secrets.token_hex(8)}",
-                    ts=now_ms(),
-                    role="user",
-                    kind="text",
-                    text=text,
-                    sender="dashboard",
-                    pending=True,
-                )
-                await self.hub.send(
-                    NODE_MESSAGES, {"session_key": key, "messages": [queued.model_dump()]}
-                )
+                await self._show_queued(key, text, request_id)
             except SocketSendError as e:
                 result["error"] = str(e)
         elif sess.harness == "pi" and sess.extra.get("inbox"):

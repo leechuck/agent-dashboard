@@ -94,7 +94,7 @@ export class Fleet {
       } else {
         const have = new Set(this.messages[session_key].map((m) => m.id))
         const fresh = messages.filter((m) => !have.has(m.id))
-        const delivered = new Set(fresh.filter((m) => m.role === 'user' && m.sender && !m.pending).map((m) => m.text.trim()))
+        const delivered = new Set(fresh.filter((m) => m.role === 'user' && m.kind === 'text' && !m.pending && !m.is_meta).map((m) => m.text.trim()))
         const kept = delivered.size ? this.messages[session_key].filter((m) => !(m.pending && delivered.has(m.text.trim()))) : this.messages[session_key]
         this.messages[session_key] = [...kept, ...fresh].slice(-2000)
       }

@@ -139,7 +139,9 @@ class HubState:
         if reset:
             cache.clear()
         delivered = {
-            m.text.strip() for m in msgs if m.role == "user" and m.sender and not m.pending
+            m.text.strip()
+            for m in msgs
+            if m.role == "user" and m.kind == "text" and not m.pending and not m.is_meta
         }
         if delivered and any(m.pending for m in cache):
             kept = [m for m in cache if not (m.pending and m.text.strip() in delivered)]

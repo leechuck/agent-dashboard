@@ -44,7 +44,7 @@
     <span class="mark">{m.sender ? '⤷' : '❯'}</span>
     <div class="body">
       <pre class="plain">{m.text}</pre>
-      <span class="when">{#if m.pending}<span class="via queued">queued · the agent has not read it yet (it is busy or a dialog is open)</span> · {:else if m.sender}<span class="via">{m.sender === 'dashboard' ? 'you, from the dashboard' : `from ${m.sender}`}</span> · {/if}{clock(m.ts)}</span>
+      <span class="when">{#if m.pending}<span class="via queued">queued · the agent has not taken it yet (it is busy or a dialog is open)</span> · {:else if m.sender}<span class="via">{m.sender === 'dashboard' ? 'you, from the dashboard' : `from ${m.sender}`}</span> · {/if}{clock(m.ts)}</span>
     </div>
   </div>
 {:else if m.kind === 'text'}
